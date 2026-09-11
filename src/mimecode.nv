@@ -1,0 +1,188 @@
+// mimecode.nv — the well-known media types as integers.
+//
+// Every body here is a `todo()`; the signatures are the design.
+//
+// THIS MODULE IS THE DEVICE HALF, and the integer is the reason it
+// exists.  A firmware HTTP server answering `GET /logo.png` off a flash
+// filesystem needs one thing from this package — the six bytes
+// `image/png` — and what it cannot do is build them: a `MimeType` holds
+// spans into a string, and a device that has no heap has no string to
+// span.  So the surface a device uses answers a CODE, every comparison
+// is an integer compare, and `code_name` is the one call that produces
+// text — from a constant, so it is in flash rather than in RAM.
+//
+// IT IS ALSO THE HOST'S FAST PATH, and that is not a coincidence.  A
+// static-file server comparing `Content-Type` strings per request is
+// comparing the same twenty strings over and over; comparing codes is
+// an integer test, and the code is what `mimeext` answers and what the
+// sniffer settles on.  The two halves are one vocabulary rather than
+// two.
+//
+// THE SET IS THE ONE THE SNIFFING STANDARD AND THE EXTENSION TABLE
+// SHARE.  A code exists for a type if something in this package can
+// produce it without being told: the WHATWG pattern table's outputs,
+// and the extensions a web server actually serves.  Everything else is
+// a `MimeType` parsed from a string, and `unknown()` is the code that
+// says so — which is a real answer rather than a failure, because
+// `application/octet-stream` is what a server sends when it does not
+// know.
+
+// The code for a type nothing here recognises.
+//
+// Its name is `application/octet-stream`, which is the honest answer
+// rather than an error: a server that does not know what a file is says
+// so with that type, and a browser that receives it offers a download
+// instead of guessing.
+pub fn unknown() -> Int []
+    todo("mime-nv.mimecode.unknown")
+
+// The codes, one function each.
+//
+// Functions rather than a `const` block or an enum, and the reason is
+// the device: an enum is not a position a `@value` sniffer's state can
+// occupy (SPEC § 14.5), and these have to be readable from inside one.
+// A function returning a literal compiles to the literal.
+
+// `text/html`.
+pub fn text_html() -> Int []
+    todo("mime-nv.mimecode.text_html")
+
+// `text/plain`.
+pub fn text_plain() -> Int []
+    todo("mime-nv.mimecode.text_plain")
+
+// `text/css`.
+pub fn text_css() -> Int []
+    todo("mime-nv.mimecode.text_css")
+
+// `text/csv`.
+pub fn text_csv() -> Int []
+    todo("mime-nv.mimecode.text_csv")
+
+// `application/javascript`.
+pub fn application_javascript() -> Int []
+    todo("mime-nv.mimecode.application_javascript")
+
+// `application/json`.
+pub fn application_json() -> Int []
+    todo("mime-nv.mimecode.application_json")
+
+// `application/xml`.
+pub fn application_xml() -> Int []
+    todo("mime-nv.mimecode.application_xml")
+
+// `application/wasm`.
+pub fn application_wasm() -> Int []
+    todo("mime-nv.mimecode.application_wasm")
+
+// `application/pdf`.
+pub fn application_pdf() -> Int []
+    todo("mime-nv.mimecode.application_pdf")
+
+// `application/zip`.
+pub fn application_zip() -> Int []
+    todo("mime-nv.mimecode.application_zip")
+
+// `application/gzip`.
+pub fn application_gzip() -> Int []
+    todo("mime-nv.mimecode.application_gzip")
+
+// `image/png`.
+pub fn image_png() -> Int []
+    todo("mime-nv.mimecode.image_png")
+
+// `image/jpeg`.
+pub fn image_jpeg() -> Int []
+    todo("mime-nv.mimecode.image_jpeg")
+
+// `image/gif`.
+pub fn image_gif() -> Int []
+    todo("mime-nv.mimecode.image_gif")
+
+// `image/webp`.
+pub fn image_webp() -> Int []
+    todo("mime-nv.mimecode.image_webp")
+
+// `image/svg+xml`.
+pub fn image_svg_xml() -> Int []
+    todo("mime-nv.mimecode.image_svg_xml")
+
+// `image/x-icon`.
+pub fn image_x_icon() -> Int []
+    todo("mime-nv.mimecode.image_x_icon")
+
+// `font/woff2`.
+pub fn font_woff2() -> Int []
+    todo("mime-nv.mimecode.font_woff2")
+
+// `audio/mpeg`.
+pub fn audio_mpeg() -> Int []
+    todo("mime-nv.mimecode.audio_mpeg")
+
+// `video/mp4`.
+pub fn video_mp4() -> Int []
+    todo("mime-nv.mimecode.video_mp4")
+
+// The full `type/subtype` a code stands for.
+//
+// From a constant, so the bytes are in flash on a device rather than
+// built in RAM.  The one call in this module that produces text.
+//
+// ```novo
+// use mimecode
+//
+// fn main() [io]
+//     println(mimecode.code_name(mimecode.image_png()))
+// ```
+pub fn code_name(code: Int) -> Str []
+    todo("mime-nv.mimecode.code_name")
+
+// The code a `type/subtype` names, or `unknown()`.
+//
+// Compared ASCII-case-insensitively, because RFC 2045 § 5.1 says type
+// and subtype are case-insensitive and browsers implement exactly that.
+// Parameters are ignored: `text/html; charset=utf-8` is `text/html`.
+pub fn code_named(essence: Str) -> Int []
+    todo("mime-nv.mimecode.code_named")
+
+// The `charset=utf-8` a code should be served with, or `""`.
+//
+// Published because getting this wrong is a bug with a visible symptom:
+// a `text/html` served without a charset is rendered with the browser's
+// locale default, and a page of UTF-8 read as Windows-1252 shows the
+// mojibake every non-English site has had at least once.  The types
+// that want a charset are the text ones and the two structured
+// text-based ones, and the list belongs beside the codes rather than in
+// a server's own `if`.
+pub fn code_charset(code: Int) -> Str []
+    todo("mime-nv.mimecode.code_charset")
+
+// Whether a code names a type that a browser will render inline rather
+// than download.
+//
+// What a server deciding `Content-Disposition` asks, and a security
+// question rather than a convenience one: a user-uploaded file served
+// as `text/html` runs script on the serving origin, which is why an
+// upload endpoint pins its own type and sends `nosniff`.
+pub fn code_is_inline(code: Int) -> Bool []
+    todo("mime-nv.mimecode.code_is_inline")
+
+// Whether a code is one of the text types.
+//
+// `text/*`, plus the structured types whose bytes are text —
+// `application/json`, `application/xml`, `application/javascript`,
+// `image/svg+xml`.  The set a caller compresses, and the set a caller
+// decodes as characters rather than handling as bytes.
+pub fn code_is_text(code: Int) -> Bool []
+    todo("mime-nv.mimecode.code_is_text")
+
+// How many codes there are.
+//
+// For a caller iterating them — a server printing what it can serve, a
+// test asserting the table is complete.
+pub fn code_count() -> Int []
+    todo("mime-nv.mimecode.code_count")
+
+// The code at an index below `code_count()`.
+pub fn code_at(index: Int) -> Int []
+    todo("mime-nv.mimecode.code_at")

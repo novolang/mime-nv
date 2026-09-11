@@ -1,0 +1,114 @@
+// mimeext.nv — the extension table, looked up both ways.
+//
+// Every body here is a `todo()`; the signatures are the design.
+//
+// WHAT AN EXTENSION IS EVIDENCE OF, EXACTLY: what the person who named
+// the file believed.  That is weak evidence and it is the only evidence
+// a static-file server has before it opens the file, which is why every
+// web server on earth has this table and why the table is the whole of
+// this module.
+//
+// THE SET IS `mime_guess`'s, WHICH IS Apache's `mime.types`.  About six
+// hundred extensions, and the reason to take somebody else's list
+// rather than curate one is that a curated list is a list that disagrees
+// with the server in front of it.  `code_for_ext` answers a
+// `mimecode` integer for the couple of dozen a web server actually
+// serves — which is the device path and the host's fast path — and
+// `type_for_ext` answers the string for the rest.
+//
+// THE REVERSE DIRECTION IS A LIST AND NOT A VALUE.  One media type has
+// several extensions: `image/jpeg` is `.jpg`, `.jpeg`, `.jpe`;
+// `text/html` is `.html` and `.htm`.  A function answering one would
+// have to pick, and the pick would be wrong for somebody.
+// `preferred_ext` picks anyway, for the caller naming a file it is
+// about to write, and it is a separate function so a call site says
+// which was meant.
+//
+// THE TABLE DISAGREES WITH THE SNIFFER, AND THAT IS THE INTERESTING
+// CASE.  A file called `photo.png` whose first bytes are a JPEG is
+// either a mistake or an attack, and which one it is is the caller's
+// judgement — so `mimesniff` answers what the bytes say, this module
+// answers what the name says, and neither overrules the other.  The
+// README says what a server should do when they differ.
+
+// The media-type code for an extension, or `mimecode.unknown()`.
+//
+// The extension may be written with or without its dot and in any case:
+// `png`, `.png` and `.PNG` are one answer.  An extension outside the
+// couple of dozen codes answers `unknown()` even when `type_for_ext`
+// knows its name — the codes are the set a device can hold, and the
+// two functions are separate because of it.
+//
+// ```novo
+// use mimecode
+// use mimeext
+//
+// fn main() [io]
+//     println(mimecode.code_name(mimeext.code_for_ext(".png")))
+// ```
+pub fn code_for_ext(ext: Str) -> Int []
+    todo("mime-nv.mimeext.code_for_ext")
+
+// The media type an extension names, or `""`.
+//
+// The full table — about six hundred entries — as a string. `""` and
+// not `application/octet-stream`, because "I have no entry" and "this
+// is bytes" are different answers and a caller that wants the second
+// has `mimecode.code_name(mimecode.unknown())`.
+pub fn type_for_ext(ext: Str) -> Str []
+    todo("mime-nv.mimeext.type_for_ext")
+
+// The media type a FILE NAME implies, from its last extension.
+//
+// `archive.tar.gz` answers `application/gzip` and not
+// `application/x-tar`, because the last extension is the outermost
+// encoding and a server sending the inner one would have a browser
+// unpack a gzip as a tar. A name with no dot, or a dotfile with no
+// extension, answers `""`.
+pub fn type_for_name(filename: Str) -> Str []
+    todo("mime-nv.mimeext.type_for_name")
+
+// The media-type code a file name implies.
+pub fn code_for_name(filename: Str) -> Int []
+    todo("mime-nv.mimeext.code_for_name")
+
+// Every extension a media type is known by, in the table's own order.
+//
+// A list because one type has several: `image/jpeg` is `.jpg`, `.jpeg`
+// and `.jpe`. The type is compared by essence, so
+// `text/html; charset=utf-8` answers the same as `text/html`.
+pub fn exts_for_type(media_type: Str) -> [Str] []
+    todo("mime-nv.mimeext.exts_for_type")
+
+// The extension a caller should use when naming a file of this type.
+//
+// The pick `exts_for_type` refuses to make, made — for the caller that
+// is about to write a file and needs one name. Separate from
+// `exts_for_type` so that a call site says which was meant. Answers
+// `""` for a type the table does not know.
+pub fn preferred_ext(media_type: Str) -> Str []
+    todo("mime-nv.mimeext.preferred_ext")
+
+// The extension part of a file name, lowercased, with its dot.
+//
+// `.gz` for `archive.tar.gz`, `""` for `README` and `""` for
+// `.gitignore` — a leading dot is a hidden file and not an extension,
+// which is the rule every shell uses and the one a server has to match
+// or it will serve `.htaccess` as a `.htaccess` file.
+pub fn ext_of(filename: Str) -> Str []
+    todo("mime-nv.mimeext.ext_of")
+
+// How many entries the extension table holds.
+pub fn ext_count() -> Int []
+    todo("mime-nv.mimeext.ext_count")
+
+// The extension at an index below `ext_count()`.
+//
+// For a caller printing what it can serve, and for a test that asserts
+// the table has the entries the README claims.
+pub fn ext_at(index: Int) -> Str []
+    todo("mime-nv.mimeext.ext_at")
+
+// Whether the table knows an extension at all.
+pub fn knows_ext(ext: Str) -> Bool []
+    todo("mime-nv.mimeext.knows_ext")

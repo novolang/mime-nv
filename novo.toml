@@ -1,0 +1,55 @@
+[package]
+name        = "mime-nv"
+version     = "0.0.1"
+description = "Media types as values: `type/subtype; param=value` parsed into spans over the caller's own string with RFC 2045's token and quoted-string rules, the extension table looked up both ways, the WHATWG MIME Sniffing pattern table as a pure function with `nosniff` as a flag, and `Accept` negotiation with q-values answering the best of a caller's own list.  Interface only — every body is a todo()."
+license     = "Apache-2.0"
+
+# An INTERFACE release: every `pub fn` body is a `todo()`, so the
+# signatures and the effect rows are published and nothing is
+# implemented.  `novo pkg publish` recognises the shape and requires
+# both the draft stability and the 0.0.x version; the first
+# implementation is the 0.1.0 published over it.
+stability   = "draft"
+
+# `core`.  A media type is a string the caller already holds, the
+# extension table is data, and sniffing is a comparison against a
+# pattern table.  Nothing is read: this package is handed the first
+# bytes of a file, it never opens one.
+#
+# It carries `tests/embedded_probe.nv`, so the device claim is BUILT.
+# The claim covers `mimecode` and the sniffer's `@value` half — a
+# firmware serving files off a flash filesystem needs a `Content-Type`
+# and has no heap to build one in, and both answers are integers.
+layer       = "core"
+
+category    = "web"
+
+tags        = ["mime", "media-type", "content-type", "sniffing", "accept", "content-negotiation", "sans-io", "embedded"]
+repository  = "https://github.com/novolang/mime-nv"
+maintainers = ["novo-lang"]
+novo        = ">= 0.8.9"
+
+# A library: no `main`, so `novo pkg build` type-checks and
+# effect-checks every module under `src/` and writes no binary.
+
+[docs.pages]
+"README.md" = "What a file is, from its name and from its first bytes — and why the two disagree"
+
+[dependencies]
+# NONE, AND TWO ABSENCES ARE WORTH NAMING.
+#
+# http-codec-nv is not here.  A `Content-Type` is a header VALUE, and a
+# header value is a string; which header it came out of is the
+# business of whatever parsed the message.  Keeping this package
+# ignorant of that is what lets the standard library's `HttpHeader`,
+# http-codec-nv's `H1Headers` and a device's own eight-line parser all
+# hand it the same string.
+#
+# unicode-nv is not here either, and the absence is a finding rather
+# than an oversight.  RFC 2045 defines a media type's grammar over
+# ASCII and browsers compare type and subtype ASCII-case-insensitively,
+# deliberately — so `TEXT/HTML` and `text/html` are one type with no
+# Unicode table anywhere.  The one place a caller might expect Unicode
+# is the `charset` parameter, and a charset NAME is an ASCII label
+# registered with IANA; what the label means is a decoder's business
+# and not this package's.

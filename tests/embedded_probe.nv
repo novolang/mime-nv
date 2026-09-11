@@ -1,0 +1,104 @@
+// embedded_probe.nv — this package's device claim, as a program that
+// either builds for a Cortex-M or does not.
+//
+// It is not a test.  `scripts/shard_audit.sh`'s `core-embedded` row
+// copies it and the modules it names into a package of its own and runs
+//
+//   novo build --target=nrf52-qemu src/probe.nv
+//
+// which produces a real Cortex-M4 ELF or fails.
+//
+// WHAT THE CLAIM COVERS.  `mimecode`, and the `@value` half of
+// `mimesniff`.  A firmware HTTP server answering `GET /logo.png` off a
+// flash filesystem needs one thing from this package — the nine bytes
+// `image/png` — and what it cannot do is build them: a `MimeType` holds
+// spans into a string and a device with no heap has no string to span.
+// So the device path is integers: a code out of the extension, or a
+// code out of the first bytes, and `code_name` at the end producing a
+// constant that lives in flash.
+//
+// `mimetype`, `mimeext` and `mimeaccept` are NOT in the probe and are
+// not claimed.  A parsed media type is a list of parameter spans, the
+// extension table is six hundred strings, and negotiation builds a
+// ranked list — all three allocate by construction.  The claim is for
+// the half that fits, and the README says which half.
+//
+// WHAT THE TIER ACTUALLY CHECKS AT 0.0.1 is narrower than it will be,
+// and saying so is more useful than pretending otherwise: every body
+// under `src/` is a `todo()`, so what links today is the SIGNATURES and
+// the types — integers in and out, and a `@value` struct of seven
+// fields passed and returned whole.  There is no pattern table in the
+// binary yet, so this probe does not prove the table fits; it proves
+// that nothing in the shape of the device surface needs an allocator or
+// a host.  Keeping it green with the table in is a named cost of the
+// implementation step.
+
+use mimecode
+use mimesniff
+
+// Every answer this probe checks, folded into one number so a single
+// comparison decides the run.  A firmware image has one line of output;
+// making it depend on all of them is what stops a passing run from
+// meaning "the first call linked".
+@tier(rt)
+fn score() -> Int
+    var n = 0
+    // The vocabulary as integers, which is the whole device path.
+    let png = mimecode.image_png()
+    let unknown = mimecode.unknown()
+    if png != unknown
+        n = n + 1
+    if mimecode.code_is_text(mimecode.text_html())
+        n = n + 1
+    if mimecode.code_is_text(png) == false
+        n = n + 1
+    if mimecode.code_is_inline(png)
+        n = n + 1
+    if mimecode.code_count() > 0
+        n = n + 1
+    // The sniffer as a value: built in this frame, fed the eight bytes
+    // of a PNG signature, and read back.  This is the shape a firmware
+    // file server has and the one that has to work with no heap.
+    let ctx = mimesniff.context_code(MimeSniffBrowsing)
+    var s = mimesniff.sniff_start(ctx)
+    if mimesniff.sniff_pos(s) == 0
+        n = n + 1
+    if mimesniff.sniff_settled(s) == false
+        n = n + 1
+    s = mimesniff.sniff_byte(s, 0x89)
+    s = mimesniff.sniff_byte(s, 0x50)
+    s = mimesniff.sniff_byte(s, 0x4E)
+    s = mimesniff.sniff_byte(s, 0x47)
+    s = mimesniff.sniff_byte(s, 0x0D)
+    s = mimesniff.sniff_byte(s, 0x0A)
+    s = mimesniff.sniff_byte(s, 0x1A)
+    s = mimesniff.sniff_byte(s, 0x0A)
+    if mimesniff.sniff_pos(s) == 8
+        n = n + 1
+    if mimesniff.sniff_code(s) == png
+        n = n + 1
+    if mimesniff.sniff_binary(s)
+        n = n + 1
+    // And the end of a resource that ran out of bytes before it ran out
+    // of patterns, which is how a four-byte file gets an answer.
+    let e = mimesniff.sniff_end(mimesniff.sniff_start(ctx))
+    if mimesniff.sniff_settled(e)
+        n = n + 1
+    if mimesniff.sniff_code(e) == unknown
+        n = n + 1
+    n
+
+@tier(rt)
+fn main() [hw, time]
+    bsp.board.init()
+    // 12 is the number of checks in `score` on the path a linked build
+    // takes.  The count is printed on a failure rather than only
+    // compared, so a device that disagrees with the host says HOW MANY
+    // it lost and a bisect has somewhere to start.
+    let n = score()
+    if n == 12
+        hal.uart.write("PASS: mime-embedded\n")
+    else
+        hal.uart.write("FAIL: mime-embedded\n")
+    loop
+        core.rt.sleep_ms(1000)

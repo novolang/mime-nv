@@ -1,0 +1,161 @@
+// mimeaccept.nv — `Accept`, and which of a caller's own types wins.
+//
+// Every body here is a `todo()`; the signatures are the design.
+//
+// THE SERVER OFFERS, THE CLIENT RANKS, AND THE ANSWER IS ONE OF THE
+// SERVER'S OWN TYPES.  That is the whole shape, and it is the opposite
+// of what a `parse_accept` on its own gives a caller: a ranked list of
+// what the client asked for is not an answer, because most of what a
+// client asks for is not on offer.  `best` takes the header and the
+// caller's list and answers an index into the caller's list, so a
+// server writes
+//
+//   match accept.best(header, ["application/json", "text/html"])
+//
+// and dispatches on the number.  Nothing is allocated and nothing is
+// compared by string past the parse.
+//
+// THE PRECEDENCE RULES ARE RFC 9110 § 12.5.1's, AND THEY ARE NOT
+// "HIGHEST q WINS".  Specificity is checked first: `text/html` beats
+// `text/*` beats `*/*` for a `text/html` offer, WHATEVER the q values
+// are, because a client that wrote `text/*;q=0.9, */*;q=1` means it
+// prefers anything textual and will take anything.  Then q, then — for
+// a genuine tie — the order the SERVER listed its offers, because that
+// is the only preference left and the server's own order is the one
+// thing a server can state.
+//
+// `q=0` IS A REFUSAL AND NOT A LOW SCORE.  `*/*;q=0` means "nothing is
+// acceptable", and a negotiator that treated it as a weak preference
+// would serve a client something it explicitly refused.  `best` answers
+// `None` there, which is a 406, and that is a different answer from
+// "the header was empty" — which means "anything", and answers the
+// server's first offer.
+//
+// THE HEADER IS NOT TRUSTED.  A caller bounds it: `best_bounded` caps
+// how many ranges will be considered, because an `Accept` with ten
+// thousand entries is not a browser and negotiation is quadratic in the
+// product of the two lists.
+
+use mimetype
+
+// One media range from an `Accept` header.
+pub struct MimeRange
+    // The type, or `*`.
+    type_name: Str
+    // The subtype, or `*`.
+    subtype: Str
+    // The q value, as thousandths: `q=0.8` is 800, an absent `q` is
+    // 1000.
+    //
+    // Thousandths and not a `Float`, because RFC 9110 § 12.4.2 gives q
+    // at most three decimal places and because two floats that should
+    // be equal sometimes are not — which in a negotiator means the
+    // order of two equally-acceptable types depending on rounding.
+    quality: Int
+    // The parameters after the q value — RFC 9110's accept-ext. Kept
+    // because they are part of the range and a caller may key on one,
+    // and because dropping them would make `print` lossy.
+    extensions: [(Str, Str)]
+
+// Parse an `Accept` header into its ranges, in the order written.
+//
+// Not sorted: the order written is information — it is `best`'s final
+// tie-break input in the rare case where the server has no preference
+// either — and a parser that sorted would have thrown it away.
+pub fn parse_accept(header: Str) -> Result<[MimeRange], mimetype.MimeError> []
+    todo("mime-nv.mimeaccept.parse_accept")
+
+// Which of the caller's offers the client would most like, as an index.
+//
+// `None` means 406: every offer was explicitly refused with `q=0`, or
+// none of them matched any range. An EMPTY header answers `Some(0)` —
+// no `Accept` means anything is acceptable, and the server's first
+// offer is its own preference.
+//
+// ```novo
+// use mimeaccept
+//
+// fn main() [io]
+//     match mimeaccept.best("text/html;q=0.9, application/json",
+//                           ["application/json", "text/html"])
+//         Some(i) => println(string_of_int(i))
+//         None    => println("406")
+// ```
+pub fn best(header: Str, offers: [Str]) -> ?Int []
+    todo("mime-nv.mimeaccept.best")
+
+// The same, with a bound on how many ranges will be considered.
+//
+// An `Accept` with ten thousand entries is not a browser, and matching
+// is quadratic in the product of the two lists. Ranges past the bound
+// are ignored rather than refused, because a header that is merely long
+// is not a reason to 400 a request that would otherwise work.
+pub fn best_bounded(header: Str, offers: [Str], max_ranges: Int) -> ?Int []
+    todo("mime-nv.mimeaccept.best_bounded")
+
+// The same, over ranges already parsed.
+//
+// For a server negotiating one header against several offer lists —
+// a content type, a language, an encoding — without parsing it each
+// time.
+pub fn best_of(ranges: [MimeRange], offers: [Str]) -> ?Int []
+    todo("mime-nv.mimeaccept.best_of")
+
+// How acceptable one type is, in thousandths.
+//
+// 0 means refused. The number `best` maximises, published so a caller
+// can rank its own offers by something else and use this as a filter.
+pub fn quality_of(ranges: [MimeRange], media_type: Str) -> Int []
+    todo("mime-nv.mimeaccept.quality_of")
+
+// Whether a range matches a media type.
+//
+// Type and subtype compared ASCII-case-insensitively, `*` matching
+// anything at either position. `*/subtype` — a wildcard type with a
+// concrete subtype — matches NOTHING: RFC 9110's grammar does not
+// produce it, and a negotiator that accepted it would match types no
+// other implementation matches.
+pub fn range_matches(r: MimeRange, media_type: Str) -> Bool []
+    todo("mime-nv.mimeaccept.range_matches")
+
+// How specific a range is: 2 for `type/subtype`, 1 for `type/*`, 0 for
+// `*/*`.
+//
+// Checked BEFORE q, which is the rule most implementations get wrong.
+// A client writing `text/*;q=0.9, */*;q=1` prefers anything textual and
+// will take anything; a negotiator that ranked by q would serve it the
+// first thing on the list.
+pub fn specificity(r: MimeRange) -> Int []
+    todo("mime-nv.mimeaccept.specificity")
+
+// A range printed back out.
+//
+// Canonical: lowercased, `q` omitted when it is 1000, extensions in the
+// order they were parsed.
+pub fn print_range(r: MimeRange) -> Str []
+    todo("mime-nv.mimeaccept.print_range")
+
+// An `Accept` header built from ranges.
+//
+// The client direction — for a caller making a request rather than
+// answering one — and for a proxy rewriting a header it received.
+pub fn print_accept(ranges: [MimeRange]) -> Str []
+    todo("mime-nv.mimeaccept.print_accept")
+
+// A range for one type at full quality.
+//
+// The one-line constructor, so a client building an `Accept` does not
+// assemble the struct field by field and leave `quality` at zero — a
+// mistake whose symptom is a 406 on a request that should have worked.
+pub fn range_of(media_type: Str) -> Result<MimeRange, mimetype.MimeError> []
+    todo("mime-nv.mimeaccept.range_of")
+
+// The `Vary` header value a response negotiated this way must carry.
+//
+// `Accept`, and the reason it is a function rather than a constant is
+// that forgetting it is a caching bug with an ugly shape: a shared
+// cache that stored a JSON response under a URL will hand it to the
+// next client that asked for HTML. A negotiator that publishes the
+// answer beside `best` makes the pair hard to separate.
+pub fn vary_header() -> Str []
+    todo("mime-nv.mimeaccept.vary_header")

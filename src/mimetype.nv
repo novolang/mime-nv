@@ -1,0 +1,221 @@
+// mimetype.nv — `type/subtype; param=value`, both directions.
+//
+// Every body here is a `todo()`; the signatures are the design.
+//
+// A MEDIA TYPE IS SPANS OVER THE CALLER'S OWN STRING.  A `Content-Type`
+// header arrives as text and almost every question about it —  is this
+// JSON, what is the charset, is this a multipart — is a comparison.
+// Answering those with copies means allocating three strings per
+// request to compare two of them, which is what a parser returning a
+// struct of `Str` makes a caller do.
+//
+// THE ESSENCE IS THE COMPARISON, AND IT IS NOT STRING EQUALITY.
+// `text/html`, `TEXT/HTML` and `text/html; charset=utf-8` are the same
+// type to a browser and three different strings to `==`.  RFC 9110
+// calls the first two bytes the media type's ESSENCE — type and
+// subtype, lowercased, parameters dropped — and that is what
+// `essence_eq` compares.  A caller that wrote `header == "text/html"`
+// has a bug that shows up the first time a server adds a charset.
+//
+// PARAMETERS ARE ORDERED AND MAY REPEAT, WHICH IS WHY THEY ARE A LIST.
+// RFC 2045 § 5.1 gives no uniqueness rule, `multipart/form-data`
+// carries a `boundary` that must survive verbatim, and a map would
+// reorder them and lose a duplicate silently.  `param` answers the
+// first, which is what every implementation does.
+//
+// QUOTED STRINGS ARE PART OF THE GRAMMAR AND NOT AN EDGE CASE.  A
+// boundary contains characters a token may not, so
+// `boundary="---=_Part_0_1"` is the ordinary spelling rather than an
+// unusual one — and a parser that only handled tokens would fail on
+// every multipart body it ever saw.
+
+// A byte range into a string the caller owns.
+pub struct MimeSpan
+    start: Int
+    len: Int
+
+// One parameter, as spans.
+//
+// `value` spans the RAW bytes, quotes included where there were any.
+// `param_str` is what unquotes, so a caller that only wants to know
+// whether a parameter is present never pays for the unescape — and a
+// caller that needs the bytes exactly as they arrived, which a
+// multipart boundary does, can still have them.
+pub struct MimeParam
+    name: MimeSpan
+    value: MimeSpan
+
+// A parsed media type.
+pub struct MimeType
+    // The type: `text` in `text/html`.
+    type_span: MimeSpan
+    // The subtype: `html`.
+    subtype_span: MimeSpan
+    // The suffix after a `+`, if any: `xml` in `image/svg+xml`.
+    //
+    // A span of its own because RFC 6839's structured syntax suffix is
+    // how a caller answers "is this XML-shaped?" for a type nobody has
+    // heard of — `application/vnd.acme.thing+json` is JSON, and a
+    // handler keyed on the suffix handles it.
+    suffix_span: MimeSpan
+    params: [MimeParam]
+
+// Why a media type would not parse.
+pub enum MimeError
+    // No `/`, or nothing on one side of it.
+    MimeNoSubtype(at: Int)
+    // A byte the RFC 2045 `token` grammar does not allow in a type,
+    // subtype or parameter name: a control, a space, or one of the
+    // tspecials `()<>@,;:\"/[]?=`.
+    MimeBadToken(at: Int, byte: Int)
+    // A quoted string with no closing quote.
+    MimeUnterminatedQuote(at: Int)
+    // A backslash at the end of a quoted string, escaping nothing.
+    MimeDanglingEscape(at: Int)
+    // A parameter with no `=`, or with no value after it.
+    MimeBadParam(at: Int)
+    // A `q` value in an `Accept` header that is not a number between 0
+    // and 1 with at most three decimal places.
+    MimeBadQuality(text: Str)
+    // More parameters, or a longer input, than the caller's bound
+    // allowed.
+    MimeTooLong(limit: Int)
+
+// The standard `Error` implementation, so a bad media type is reported
+// by anything that reports errors.
+impl Error for MimeError
+    // The one-line report: what was wrong and at what byte offset. The
+    // offset is in the message because a `Content-Type` is one short
+    // string and there is no other landmark in it.
+    fn message(self) -> Str
+        todo("mime-nv.mimetype.MimeError.message")
+
+// Parse a media type.
+//
+// ```novo
+// use mimetype
+//
+// fn main() [io]
+//     let header = "text/html; charset=utf-8"
+//     match mimetype.parse(header)
+//         Ok(m)  => println(mimetype.essence(header, m))
+//         Err(_) => println("refused")
+// ```
+pub fn parse(input: Str) -> Result<MimeType, MimeError> []
+    todo("mime-nv.mimetype.parse")
+
+// Parse a media type, bounding what will be accepted.
+//
+// `max_params` and `max_bytes` are for a caller parsing a header that
+// arrived from outside: a `Content-Type` with four thousand parameters
+// is not a browser, and a bound is cheaper than a timeout.
+pub fn parse_bounded(input: Str, max_params: Int, max_bytes: Int) -> Result<MimeType, MimeError> []
+    todo("mime-nv.mimetype.parse_bounded")
+
+// The type, lowercased.
+pub fn type_of(input: Str, m: MimeType) -> Str []
+    todo("mime-nv.mimetype.type_of")
+
+// The subtype, lowercased, with any `+suffix` still on it.
+pub fn subtype_of(input: Str, m: MimeType) -> Str []
+    todo("mime-nv.mimetype.subtype_of")
+
+// The structured syntax suffix, lowercased, or `""`.
+//
+// `xml` for `image/svg+xml`, `json` for
+// `application/vnd.acme.thing+json`. How a caller handles a type nobody
+// has heard of: the suffix says what shape the bytes are.
+pub fn suffix_of(input: Str, m: MimeType) -> Str []
+    todo("mime-nv.mimetype.suffix_of")
+
+// `type/subtype`, lowercased, with the parameters dropped.
+//
+// RFC 9110's own word for it, and the thing a caller should compare
+// rather than the header. Allocates one string; `essence_eq` compares
+// without allocating at all.
+pub fn essence(input: Str, m: MimeType) -> Str []
+    todo("mime-nv.mimetype.essence")
+
+// Whether a parsed type's essence is a given `type/subtype`.
+//
+// The comparison that has no copies in it, and the one a request path
+// should use. `probe` is compared ASCII-case-insensitively.
+pub fn essence_eq(input: Str, m: MimeType, probe: Str) -> Bool []
+    todo("mime-nv.mimetype.essence_eq")
+
+// A parameter's raw value span, by name.
+//
+// The name is compared ASCII-case-insensitively, which RFC 2045 § 5.1
+// requires. Answers the FIRST match: parameters may repeat and no rule
+// says which wins, so this follows what every implementation does.
+pub fn param(input: Str, m: MimeType, name: Str) -> ?MimeSpan []
+    todo("mime-nv.mimetype.param")
+
+// A parameter's value, unquoted and unescaped.
+pub fn param_str(input: Str, m: MimeType, name: Str) -> ?Str []
+    todo("mime-nv.mimetype.param_str")
+
+// The `charset` parameter, lowercased, or `""`.
+//
+// Named rather than left to `param_str` because it is the parameter
+// almost every caller wants and because getting it wrong has a visible
+// symptom: a UTF-8 page read as Windows-1252 is the mojibake every
+// non-English site has had at least once.
+//
+// Lowercased because charset names are case-insensitive per RFC 2046,
+// so `UTF-8` and `utf-8` are one answer.
+pub fn charset(input: Str, m: MimeType) -> Str []
+    todo("mime-nv.mimetype.charset")
+
+// The `boundary` parameter, unquoted, or `""`.
+//
+// The other named one, and for the opposite reason: a multipart body
+// cannot be read without it, and the value is the case that makes
+// quoted strings part of the grammar rather than an edge case.
+pub fn boundary(input: Str, m: MimeType) -> Str []
+    todo("mime-nv.mimetype.boundary")
+
+// The text a span covers.
+pub fn span_str(input: Str, sp: MimeSpan) -> Str []
+    todo("mime-nv.mimetype.span_str")
+
+// The media type printed back out, canonically.
+//
+// Type and subtype lowercased, parameters in the order they were
+// parsed, each value quoted only if the token grammar refuses it
+// bare. NOT a round trip of the input: a header written with odd
+// spacing or a needlessly quoted token comes back normalised, which is
+// what a caller re-emitting a type wants and what makes two equal types
+// print equal.
+pub fn print(input: Str, m: MimeType) -> Str []
+    todo("mime-nv.mimetype.print")
+
+// A media type built from parts, with the byte rules checked.
+//
+// Answers a `Result` because a caller can hand this a subtype with a
+// space in it, and a writer that emitted one would produce a header the
+// receiver truncates at the space — which looks like a different type
+// rather than like an error.
+pub fn build(type_name: Str, subtype: Str, params: [(Str, Str)]) -> Result<Str, MimeError> []
+    todo("mime-nv.mimetype.build")
+
+// Whether a byte may appear in an RFC 2045 `token`.
+//
+// Public because the same rule decides a type, a subtype, a parameter
+// name and an unquoted parameter value, and because a caller validating
+// a type it built itself should be able to ask.
+pub fn token_byte_ok(byte: Int) -> Bool []
+    todo("mime-nv.mimetype.token_byte_ok")
+
+// Whether a value needs quoting to appear in a parameter.
+pub fn needs_quoting(value: Str) -> Bool []
+    todo("mime-nv.mimetype.needs_quoting")
+
+// A parameter value with quotes and backslash escapes added if it needs
+// them.
+pub fn quote(value: Str) -> Result<Str, MimeError> []
+    todo("mime-nv.mimetype.quote")
+
+// A quoted string with its quotes removed and its escapes resolved.
+pub fn unquote(value: Str) -> Result<Str, MimeError> []
+    todo("mime-nv.mimetype.unquote")

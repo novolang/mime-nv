@@ -1,0 +1,304 @@
+// mimetype_tests.nv — the grammar, the essence, and the extension
+// table.
+//
+// RED ON PURPOSE: every body under `src/` is a `todo()`, so every
+// assertion here reaches `not implemented: mime-nv.<module>.<fn>`.
+//
+// THE CASES ARE THE ONES `header == "text/html"` GETS WRONG.  A media
+// type has three spellings of one meaning — case, parameters, and
+// spacing — and a caller comparing the header string handles none of
+// them.  The suite is built around that comparison rather than around
+// the parser, because the parser is the easy half.
+
+use std.test
+use std.list
+use mimecode
+use mimetype
+use mimeext
+
+@test
+fn test_a_media_type_is_spans_over_the_callers_own_string() [io]
+    let input = "text/html; charset=utf-8"
+
+    test.case("the type and subtype come back as ranges")
+    match mimetype.parse(input)
+        Ok(m)  =>
+            test.assert(m.type_span.start == 0)
+            test.assert(m.type_span.len == 4)
+            test.assert(mimetype.span_str(input, m.subtype_span) == "html")
+            test.assert(list.len(m.params) == 1)
+        Err(_) => test.assert(false)
+
+    test.case("a type with no parameters has none, rather than one empty one")
+    match mimetype.parse("image/png")
+        Ok(m)  => test.assert(list.len(m.params) == 0)
+        Err(_) => test.assert(false)
+
+    test.case("the structured syntax suffix is its own span")
+    match mimetype.parse("application/vnd.acme.thing+json")
+        Ok(m)  => test.assert(mimetype.suffix_of("application/vnd.acme.thing+json", m)
+                              == "json")
+        Err(_) => test.assert(false)
+
+    test.case("and a type with no `+` has an empty one")
+    match mimetype.parse("text/html")
+        Ok(m)  => test.assert(mimetype.suffix_of("text/html", m) == "")
+        Err(_) => test.assert(false)
+
+@test
+fn test_the_essence_is_the_comparison_and_string_equality_is_the_bug() [io]
+    let plain = "text/html"
+    let cased = "TEXT/HTML"
+    let charsetted = "text/html; charset=utf-8"
+    let spaced = "text/html ;  charset=utf-8"
+
+    test.case("case does not change a media type")
+    match mimetype.parse(cased)
+        Ok(m)  => test.assert(mimetype.essence(cased, m) == "text/html")
+        Err(_) => test.assert(false)
+
+    test.case("nor does a parameter")
+    match mimetype.parse(charsetted)
+        Ok(m)  => test.assert(mimetype.essence_eq(charsetted, m, "text/html"))
+        Err(_) => test.assert(false)
+
+    test.case("nor does spacing")
+    match mimetype.parse(spaced)
+        Ok(m)  => test.assert(mimetype.essence_eq(spaced, m, "text/html"))
+        Err(_) => test.assert(false)
+
+    test.case("and the probe is compared case-insensitively too")
+    match mimetype.parse(plain)
+        Ok(m)  =>
+            test.assert(mimetype.essence_eq(plain, m, "TEXT/HTML"))
+            test.assert(mimetype.essence_eq(plain, m, "text/plain") == false)
+        Err(_) => test.assert(false)
+
+@test
+fn test_the_two_named_parameters_are_named_for_two_different_reasons() [io]
+    let ct = "text/html; charset=UTF-8"
+
+    test.case("charset is lowercased, because charset names are case-insensitive")
+    match mimetype.parse(ct)
+        Ok(m)  => test.assert(mimetype.charset(ct, m) == "utf-8")
+        Err(_) => test.assert(false)
+
+    test.case("and is empty when the header did not say, which is a real answer")
+    match mimetype.parse("text/html")
+        Ok(m)  => test.assert(mimetype.charset("text/html", m) == "")
+        Err(_) => test.assert(false)
+
+    test.case("a boundary is the case that makes quoted strings ordinary")
+    let mp = "multipart/form-data; boundary=\"---=_Part_0_1\""
+    match mimetype.parse(mp)
+        Ok(m)  => test.assert(mimetype.boundary(mp, m) == "---=_Part_0_1")
+        Err(_) => test.assert(false)
+
+    test.case("a parameter name is matched case-insensitively, per RFC 2045 § 5.1")
+    match mimetype.parse("text/html; CHARSET=utf-8")
+        Ok(m)  => test.assert(mimetype.param_str("text/html; CHARSET=utf-8", m,
+                                                 "charset") == Some("utf-8"))
+        Err(_) => test.assert(false)
+
+    test.case("a repeated parameter answers the first, which is what every implementation does")
+    let dup = "text/html; charset=utf-8; charset=latin1"
+    match mimetype.parse(dup)
+        Ok(m)  =>
+            test.assert(list.len(m.params) == 2)
+            test.assert(mimetype.param_str(dup, m, "charset") == Some("utf-8"))
+        Err(_) => test.assert(false)
+
+    test.case("and a parameter nobody set is absent")
+    match mimetype.parse("text/html")
+        Ok(m)  => test.assert(mimetype.param("text/html", m, "charset") == None)
+        Err(_) => test.assert(false)
+
+@test
+fn test_every_refusal_is_a_header_that_would_be_read_as_something_else() [io]
+    test.case("no subtype at all")
+    match mimetype.parse("text")
+        Ok(_)  => test.assert(false)
+        Err(e) =>
+            match e
+                MimeNoSubtype(_) => test.assert(true)
+                _                => test.assert(false)
+
+    test.case("a space inside a token would truncate the type at the receiver")
+    match mimetype.parse("text/ht ml")
+        Ok(_)  => test.assert(false)
+        Err(e) =>
+            match e
+                MimeBadToken(_, b) => test.assert(b == 32)
+                _                  => test.assert(false)
+
+    test.case("an unterminated quote swallows the rest of the header")
+    match mimetype.parse("multipart/form-data; boundary=\"abc")
+        Ok(_)  => test.assert(false)
+        Err(e) =>
+            match e
+                MimeUnterminatedQuote(_) => test.assert(true)
+                _                        => test.assert(false)
+
+    test.case("a backslash escaping nothing")
+    match mimetype.parse("text/html; x=\"a\\")
+        Ok(_)  => test.assert(false)
+        Err(_) => test.assert(true)
+
+    test.case("a parameter with no value")
+    match mimetype.parse("text/html; charset")
+        Ok(_)  => test.assert(false)
+        Err(e) =>
+            match e
+                MimeBadParam(_) => test.assert(true)
+                _               => test.assert(false)
+
+    test.case("and a header past the caller's bound, which is cheaper than a timeout")
+    match mimetype.parse_bounded("text/html; a=1; b=2; c=3", 2, 4096)
+        Ok(_)  => test.assert(false)
+        Err(e) =>
+            match e
+                MimeTooLong(n) => test.assert(n == 2)
+                _              => test.assert(false)
+
+@test
+fn test_printing_normalises_rather_than_round_tripping() [io]
+    // Two equal types print equal, which is the property a caller
+    // re-emitting a header wants.
+    let odd = "TEXT/HTML ;  CHARSET=\"utf-8\""
+    test.case("case folds, spacing settles, and a needlessly quoted token loses its quotes")
+    match mimetype.parse(odd)
+        Ok(m)  => test.assert(mimetype.print(odd, m) == "text/html; charset=utf-8")
+        Err(_) => test.assert(false)
+
+    test.case("building from parts checks the byte rules")
+    match mimetype.build("text", "html", [("charset", "utf-8")])
+        Ok(s)  => test.assert(s == "text/html; charset=utf-8")
+        Err(_) => test.assert(false)
+
+    test.case("and refuses a subtype a receiver would truncate")
+    match mimetype.build("text", "ht ml", [])
+        Ok(_)  => test.assert(false)
+        Err(_) => test.assert(true)
+
+    test.case("a value that needs quoting gets it")
+    test.assert(mimetype.needs_quoting("---=_Part_0_1"))
+    test.assert(mimetype.needs_quoting("utf-8") == false)
+    match mimetype.quote("a b")
+        Ok(q)  => test.assert(q == "\"a b\"")
+        Err(_) => test.assert(false)
+
+    test.case("and unquoting resolves the escapes")
+    match mimetype.unquote("\"a\\\"b\"")
+        Ok(v)  => test.assert(v == "a\"b")
+        Err(_) => test.assert(false)
+
+    test.case("the token rule is the one every position shares")
+    test.assert(mimetype.token_byte_ok(0x61))
+    test.assert(mimetype.token_byte_ok(0x2F) == false)
+    test.assert(mimetype.token_byte_ok(0x3B) == false)
+    test.assert(mimetype.token_byte_ok(0x20) == false)
+
+@test
+fn test_the_extension_table_answers_what_the_name_claims() [io]
+    test.case("an extension answers a code, with or without its dot and in any case")
+    test.assert(mimeext.code_for_ext(".png") == mimecode.image_png())
+    test.assert(mimeext.code_for_ext("png") == mimecode.image_png())
+    test.assert(mimeext.code_for_ext(".PNG") == mimecode.image_png())
+
+    test.case("and a name answers one from its LAST extension")
+    test.assert(mimeext.code_for_name("archive.tar.gz") == mimecode.application_gzip())
+
+    test.case("the full table answers strings for the rest")
+    test.assert(mimeext.type_for_ext(".png") == "image/png")
+    test.assert(mimeext.type_for_name("page.html") == "text/html")
+
+    test.case("an extension the table does not know is empty, not octet-stream")
+    test.assert(mimeext.type_for_ext(".nosuch") == "")
+    test.assert(mimeext.knows_ext(".nosuch") == false)
+    test.assert(mimeext.code_for_ext(".nosuch") == mimecode.unknown())
+
+    test.case("a dotfile has no extension, which is what a server must match or it serves .htaccess")
+    test.assert(mimeext.ext_of(".gitignore") == "")
+    test.assert(mimeext.ext_of("README") == "")
+    test.assert(mimeext.ext_of("archive.tar.gz") == ".gz")
+
+    test.case("one type has several extensions, so the reverse direction is a list")
+    let jpegs = mimeext.exts_for_type("image/jpeg")
+    test.assert(list.len(jpegs) > 1)
+
+    test.case("and the pick a caller naming a file needs is a separate function")
+    test.assert(mimeext.preferred_ext("image/jpeg") == ".jpg")
+    test.assert(mimeext.preferred_ext("application/nosuch") == "")
+
+    test.case("the reverse lookup compares by essence, so a charset does not hide the type")
+    test.assert(list.len(mimeext.exts_for_type("text/html; charset=utf-8")) > 0)
+
+    test.case("the table is enumerable, for a server printing what it can serve")
+    test.assert(mimeext.ext_count() > 0)
+    test.assert(mimeext.ext_at(0) != "")
+
+@test
+fn test_a_code_is_the_vocabulary_both_halves_share() [io]
+    test.case("a code names its type from a constant")
+    test.assert(mimecode.code_name(mimecode.image_png()) == "image/png")
+    test.assert(mimecode.code_name(mimecode.unknown()) == "application/octet-stream")
+
+    test.case("and a name answers a code, ignoring case and parameters")
+    test.assert(mimecode.code_named("IMAGE/PNG") == mimecode.image_png())
+    test.assert(mimecode.code_named("text/html; charset=utf-8") == mimecode.text_html())
+    test.assert(mimecode.code_named("application/nosuch") == mimecode.unknown())
+
+    test.case("the text types are the ones a caller decodes as characters")
+    test.assert(mimecode.code_is_text(mimecode.application_json()))
+    test.assert(mimecode.code_is_text(mimecode.image_svg_xml()))
+    test.assert(mimecode.code_is_text(mimecode.application_zip()) == false)
+
+    test.case("the charset a type should be served with is beside the code, not in a server's `if`")
+    test.assert(mimecode.code_charset(mimecode.text_html()) == "utf-8")
+    test.assert(mimecode.code_charset(mimecode.image_png()) == "")
+
+    test.case("and whether a browser renders it inline is a security question a server asks")
+    test.assert(mimecode.code_is_inline(mimecode.text_html()))
+    test.assert(mimecode.code_is_inline(mimecode.application_zip()) == false)
+
+    test.case("the codes are enumerable")
+    test.assert(mimecode.code_count() > 0)
+    test.assert(mimecode.code_at(0) != mimecode.unknown())
+
+@test
+fn test_the_code_set_is_what_a_web_server_actually_serves() [io]
+    // A code exists for a type if something in this package can produce
+    // it without being told: the sniffer's outputs, and the extensions a
+    // static-file server hands out.  Every one of them is distinct, and
+    // every one names itself.
+    test.case("the text types a site is built out of")
+    test.assert(mimecode.code_name(mimecode.text_css()) == "text/css")
+    test.assert(mimecode.code_name(mimecode.text_csv()) == "text/csv")
+    test.assert(mimecode.code_name(mimecode.application_javascript())
+                == "application/javascript")
+    test.assert(mimecode.code_name(mimecode.application_xml()) == "application/xml")
+
+    test.case("the assets beside them")
+    test.assert(mimecode.code_name(mimecode.image_webp()) == "image/webp")
+    test.assert(mimecode.code_name(mimecode.image_x_icon()) == "image/x-icon")
+    test.assert(mimecode.code_name(mimecode.font_woff2()) == "font/woff2")
+
+    test.case("and the media types the sniffing table can answer")
+    test.assert(mimecode.code_name(mimecode.audio_mpeg()) == "audio/mpeg")
+    test.assert(mimecode.code_name(mimecode.video_mp4()) == "video/mp4")
+
+    test.case("a font is not text, and neither is a video")
+    test.assert(mimecode.code_is_text(mimecode.font_woff2()) == false)
+    test.assert(mimecode.code_is_text(mimecode.video_mp4()) == false)
+
+@test
+fn test_the_type_and_the_subtype_are_readable_on_their_own() [io]
+    // For a caller dispatching on the type alone — a proxy that treats
+    // every `image/*` the same way — and for one keyed on the subtype.
+    let input = "IMAGE/SVG+XML"
+    test.case("both come back lowercased")
+    match mimetype.parse(input)
+        Ok(m)  =>
+            test.assert(mimetype.type_of(input, m) == "image")
+            test.assert(mimetype.subtype_of(input, m) == "svg+xml")
+        Err(_) => test.assert(false)
