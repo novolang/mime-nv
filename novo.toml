@@ -1,6 +1,6 @@
 [package]
 name        = "mime-nv"
-version     = "0.0.1"
+version     = "0.0.2"
 description = "Media types as values: `type/subtype; param=value` parsed into spans over the caller's own string with RFC 2045's token and quoted-string rules, the extension table looked up both ways, the WHATWG MIME Sniffing pattern table as a pure function with `nosniff` as a flag, and `Accept` negotiation with q-values answering the best of a caller's own list.  Interface only — every body is a todo()."
 license     = "Apache-2.0"
 

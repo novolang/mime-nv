@@ -1,275 +1,327 @@
 # mime-nv
 
-**Status: NOT IMPLEMENTED — interface only.**
+A media type, also called a MIME type, names what a piece of data is.
+It is written `type/subtype`, optionally followed by parameters, and
+its grammar is
+[RFC 2045 section 5.1](https://www.rfc-editor.org/rfc/rfc2045#section-5.1).
+`Content-Type` carries one. This package parses a media type, looks one
+up from a file's name, works one out from a file's first bytes to the
+[WHATWG MIME Sniffing Standard](https://mimesniff.spec.whatwg.org/),
+and answers an `Accept` header to
+[RFC 9110 section 12.5.1](https://www.rfc-editor.org/rfc/rfc9110#section-12.5.1).
+[form-nv](https://novo-lang.org/packages/form-nv) and
+[static-nv](https://novo-lang.org/packages/static-nv) are built on it.
 
-Every public function below is published with its signature and its
-effect row, and every body is `todo()`. Installing this package works;
-calling it panics with `not implemented`.
+**Status: NOT IMPLEMENTED — interface only.** Every function is
+declared with its full signature, but every body is a `todo()` that
+panics when called. The package is published so its design can be
+reviewed and depended on before it is implemented. Version 0.1.0 will
+be the first working release.
 
-## What this is
+## What a media type is
 
-Media types as values: what a file claims to be, what its bytes say it
-is, and which of a server's own answers a client would most like.
+`text/html; charset=utf-8` is a **type**, `text`, a **subtype**,
+`html`, and one **parameter** with a name and a value. The type and the
+subtype together, lowercased and with the parameters dropped, are the
+media type's **essence** (RFC 9110 section 8.3.1). `text/html`,
+`TEXT/HTML` and `text/html; charset=utf-8` have one essence and are
+three different strings.
 
-- `mimecode` — the well-known types as integers; the device half;
-- `mimetype` — `type/subtype; param=value`, parsed into spans;
-- `mimeext` — the extension table, both ways;
-- `mimesniff` — the WHATWG pattern table, with `nosniff` as a flag;
-- `mimeaccept` — negotiation, answering one of the caller's offers.
+A parameter value is either a **token**, which excludes control
+characters, spaces and the separators `()<>@,;:\"/[]?=`, or a **quoted
+string** in double quotes with backslash escapes. A `multipart`
+boundary usually needs the quoted form, because it contains characters
+a token may not.
+
+A subtype may carry a **structured syntax suffix** after a `+`, such as
+`image/svg+xml` and `application/ld+json` (RFC 6839). The suffix says
+what the underlying syntax is, so a parser for that syntax can be
+chosen without knowing the subtype.
+
+**Sniffing** is working out what data is from its leading bytes rather
+than from what a server said. Browsers do it because servers get
+`Content-Type` wrong. The WHATWG standard fixes a pattern table, the
+order in which it is consulted, and the set of supplied types that may
+be overridden at all. The response header
+`X-Content-Type-Options: nosniff` turns it off for one response.
+
+An **`Accept` header** is a client's list of media **ranges** with
+optional quality values, such as `text/html;q=0.8, application/json`. A
+range may use `*` for the type, the subtype or both. The quality value
+`q` runs from 0 to 1 with at most three decimal places, and `q=0` means
+the range is not acceptable at all.
+
+Every function in this package performs no input and no output. It is
+handed a file's first bytes and never opens one.
+
+## Install
 
 ```
 novo pkg add mime-nv
-novo pkg build
-novo test
 ```
 
-## The one example that will work
+## Example
 
-```novo ignore
+```novo
+use std.bytes
+use mimeaccept
 use mimecode
 use mimeext
 use mimesniff
+use mimetype
 
-// What a static-file server sends for a file it just read.
-fn content_type(filename: Str, head: Bytes) -> Str
-    let claimed = mimeext.code_for_name(filename)
-    if claimed == mimecode.unknown()
-        mimecode.code_name(mimesniff.sniff(head, MimeSniffBrowsing))
-    else
-        mimecode.code_name(claimed)
+fn main() [io]
+    // What the file's name claims it is.
+    println(mimeext.type_for_name("logo.png"))
+
+    // What its first bytes say it is, for a resource fetched by a
+    // browser. The answer is a code; `code_name` spells it.
+    let head = bytes.from_str("\x89PNG\r\n\x1a\n")
+    println(mimecode.code_name(mimesniff.sniff(head, MimeSniffBrowsing)))
+
+    // Whether a request body is JSON. The comparison ignores the
+    // parameters and the case.
+    let header = "application/json; charset=utf-8"
+    match mimetype.parse(header)
+        Err(e) => println("bad Content-Type: ${e.message()}")
+        Ok(m)  => println("json: ${mimetype.essence_eq(header, m, "application/json")}")
+
+    // Which of this server's two answers the client would rather have.
+    match mimeaccept.best("text/html;q=0.8, application/json", ["application/json", "text/html"])
+        Some(i) => println("offer ${i}")
+        None    => println("406: nothing on offer is acceptable")
 ```
 
-## The load-bearing interface: `sniff_with`
+Build and test with `novo pkg build` and `novo test`. Today `novo test`
+fails on purpose: every test reaches a
+`not implemented: mime-nv.<module>.<fn>` panic. The tests are the
+specification the implementation will have to satisfy.
 
-```novo ignore
-pub fn sniff_with(head: Bytes, supplied: Str, nosniff: Bool,
-                  ctx: MimeSniffContext) -> Int []
-```
+## What the package contains
 
-**Sniffing is a security mechanism pretending to be a convenience.** A
-browser sniffs because servers lie about `Content-Type`, and the
-consequence is that a file a site let a user upload can be made to run
-as HTML **on that site's own origin**: upload a `.txt` whose first bytes
-are `<!DOCTYPE html>`, serve it as `text/plain`, and a browser that
-sniffs will render it.
+| Module | Contents |
+| --- | --- |
+| `mimecode` | The well-known media types as integer codes, with the name, the default charset and two predicates for each. |
+| `mimetype` | `type/subtype; param=value` parsed into ranges over the caller's string, the essence comparison, and the writer. |
+| `mimeext` | The extension table, looked up from a name to a type and from a type to its extensions. |
+| `mimesniff` | The WHATWG pattern table as a function of the bytes, the supplied type and the `nosniff` flag, and the same table as a `@value` state machine. |
+| `mimeaccept` | `Accept` parsed into ranges, and the caller's own list of offers ranked against it. |
 
-That is why `X-Content-Type-Options: nosniff` exists, and why it is a
-parameter here rather than a sentence in a README. The algorithm's
-answer depends on all three of the bytes, the supplied type and the
-flag, and a function that took only the bytes would be answering a
-different question from the one a browser asks:
+## How to choose an entry point
 
-| supplied | `nosniff` | answer |
-| --- | --- | --- |
-| `text/plain` | no | **sniffed** — the bytes decide |
-| `text/plain` | yes | `text/plain` — the bytes are not consulted |
-| `image/png` | no | `image/png` — not a sniffable type |
+**`mimetype.parse` reads a header value.** The result is spans into
+that string, so a request that only asks whether the body is JSON
+copies nothing. `parse_bounded` refuses an input longer than a caller's
+limit or with more parameters than it allows.
 
-The last row is the part most descriptions of sniffing leave out.
-Sniffing is not "the bytes win": a supplied type outside a named set —
-`text/plain`, `application/octet-stream`, `unknown/unknown`, `*/*` and
-absent — is **kept**. `is_sniffable_type` answers that question on its
-own, and `would_sniff` is what a server asks about **its own** response
-before it sends one.
+**`mimeext.type_for_name` answers what a file's name claims.** It is
+the cheap question, and the only one a server has before it opens the
+file.
 
-## The extension table and the sniffer disagree, and neither overrules
+**`mimesniff.sniff` answers what bytes say, with no supplied type.**
+Use it for data with no `Content-Type` at all, such as a file off a
+disk. **`sniff_with` is the browser's own question**, taking the bytes,
+the supplied type and the `nosniff` flag. **`would_sniff` is what a
+server asks about its own response** before it sends one.
 
-An extension is evidence of one thing: what the person who named the
-file believed. That is weak evidence, and it is the only evidence a
-server has before it opens the file.
+**`mimeaccept.best` takes the header and the caller's offers** and
+answers an index into the offers. `best_of` takes ranges already
+parsed, for a caller answering several requests against one header.
+`best_bounded` caps how many ranges it will parse.
 
-So `mimeext` answers what the **name** says, `mimesniff` answers what
-the **bytes** say, and this package never reconciles them — because the
-right answer differs by caller:
+**`mimecode` is the device path.** See "Running on a microcontroller".
 
-- a **static-file server** over its own content trusts the name: it
-  put the files there;
-- an **upload endpoint** trusts neither, pins a type of its own
-  choosing, and sends `nosniff` — because a `photo.png` whose bytes are
-  HTML is either a mistake or an attack;
-- an **archiver** or a **mail client** wants both, and to say so when
-  they differ.
+## The rules a user needs
 
-`code_is_inline` is published for the second case: whether a browser
-renders a type inline rather than downloading it is the question that
-decides whether an upload can run script on the serving origin.
+1. **Compare essences, not strings.** `mimetype.essence_eq` lowercases
+   and drops the parameters and allocates nothing. A program that wrote
+   `header == "text/html"` breaks the first time a server adds a
+   charset.
+2. **Parameters are a list, not a map.** RFC 2045 gives no uniqueness
+   rule, and a `multipart/form-data` boundary must survive verbatim. A
+   map would reorder them and drop a duplicate silently.
+3. **Quoted strings are ordinary, not an edge case.**
+   `boundary="---=_Part_0_1"` is the usual spelling, because a boundary
+   contains characters a token may not.
+4. **Sniffing is not "the bytes win".** A supplied type outside a named
+   set is kept. The set is `text/plain`,
+   `application/octet-stream`, `unknown/unknown`, `*/*`, and no type at
+   all. `mimesniff.is_sniffable_type` answers the question on its own.
 
-## The essence is the comparison, and `==` on the header is the bug
+   | Supplied type | `nosniff` | Answer |
+   | --- | --- | --- |
+   | `text/plain` | no | the bytes decide |
+   | `text/plain` | yes | `text/plain`; the bytes are not consulted |
+   | `image/png` | no | `image/png`; not a sniffable type |
 
-`text/html`, `TEXT/HTML` and `text/html; charset=utf-8` are one type to
-a browser and three strings to `==`. RFC 9110 calls the first two bytes
-the media type's **essence** — type and subtype, lowercased, parameters
-dropped — and `essence_eq` compares that without allocating anything.
+5. **Sniffing is a security mechanism.** A file a site lets a user
+   upload can be made to run as HTML on that site's own origin: a `.txt`
+   whose first bytes are `<!DOCTYPE html>`, served as `text/plain`,
+   renders as a page in a browser that sniffs. `nosniff` is what stops
+   that, and `mimecode.code_is_inline` answers whether a browser
+   displays a type rather than downloading it.
+6. **The name and the bytes are two answers, and this package
+   reconciles neither.** An extension is evidence of what whoever named
+   the file believed. Which answer to take depends on the caller: a
+   server over its own content trusts the name, an upload endpoint
+   trusts neither and pins a type of its own with `nosniff`, and an
+   archiver wants both and reports a disagreement.
+7. **The sniffing algorithm never looks past
+   `mimesniff.header_bytes()` bytes**, which is 1445. A server reading
+   a file to decide its type reads that many.
+8. **Specificity is checked before quality.** RFC 9110 section 12.5.1
+   orders by the most specific range first, then by `q`, then by the
+   server's own order. `text/*;q=0.9, */*;q=1` means the client prefers
+   anything textual and will take anything; a negotiator that ranked by
+   `q` alone would serve it the first thing on its list.
+9. **`q=0` is a refusal.** `*/*;q=0` means nothing is acceptable and
+   `mimeaccept.best` answers `None`, which is a 406. An **empty**
+   header is the opposite: anything is acceptable, and the server's
+   first offer wins.
+10. **A quality value is carried as thousandths.** `q=0.8` is 800 and
+    an absent `q` is 1000. RFC 9110 section 12.4.2 allows at most three
+    decimal places, and two floating-point values that should compare
+    equal sometimes do not, which in a negotiator reorders two equally
+    acceptable types.
+11. **`mimeaccept.parse_accept` does not sort.** The order written is
+    the final tie-break, so a parser that sorted would have thrown it
+    away.
+12. **Send `Vary: Accept` with a negotiated response.**
+    `mimeaccept.vary_header()` is that value. Without it a shared cache
+    stores a JSON response under a URL and hands it to the next client
+    that asked for HTML.
+13. **Type and subtype are compared ASCII case-insensitively**, which
+    is the specification's own rule. The `charset` parameter's value is
+    an ASCII label registered with IANA; what the label means is a
+    decoder's business.
 
-A caller that wrote `header == "text/html"` has a bug that appears the
-first time a server adds a charset.
+## Running on a microcontroller
 
-A parsed type is **spans over the caller's own string**, so a request
-that only asks "is this JSON?" copies nothing. Parameters are a **list**
-and not a map: RFC 2045 gives no uniqueness rule, `multipart/form-data`
-carries a `boundary` that must survive verbatim, and a map would reorder
-them and lose a duplicate silently.
-
-Quoted strings are part of the grammar rather than an edge case — a
-boundary contains characters a token may not, so
-`boundary="---=_Part_0_1"` is the ordinary spelling and a parser that
-only handled tokens would fail on every multipart body it ever saw.
-
-## Negotiation answers one of the server's own offers
-
-```novo ignore
-match mimeaccept.best(header, ["application/json", "text/html"])
-    Some(i) => ...    // dispatch on the index
-    None    => ...    // 406
-```
-
-A ranked list of what the *client* asked for is not an answer, because
-most of what a client asks for is not on offer. `best` takes the header
-and the caller's list and answers an **index into the caller's list**.
-
-**Specificity is checked before q**, and that is the rule most
-implementations get wrong. `text/*;q=0.9, */*;q=1` means *"I prefer
-anything textual, and I will take anything"* — a negotiator that ranked
-by q would serve it the first thing on its list. RFC 9110 § 12.5.1: most
-specific first, then q, then the server's own order.
-
-**`q=0` is a refusal, not a low score.** `*/*;q=0` means nothing is
-acceptable, and `best` answers `None` — a 406. That is a different
-answer from an **empty** header, which means anything and takes the
-server's first offer.
-
-q is carried as **thousandths** rather than a `Float`, because RFC 9110
-gives it at most three decimal places and because two floats that should
-compare equal sometimes do not — which in a negotiator means the order
-of two equally-acceptable types depending on rounding.
-
-`vary_header()` is published beside `best` because forgetting `Vary` is
-a caching bug with an ugly shape: a shared cache that stored a JSON
-response under a URL hands it to the next client that asked for HTML.
-
-## The device claim, and the half it covers
-
-`@tier(embedded)` is claimed for **`mimecode` and the `@value` half of
-`mimesniff`**, and `tests/embedded_probe.nv` builds for
-`--target=nrf52-qemu`.
+novo-lang lets a package state which of its modules can run on a device
+with no heap allocator, and the compiler checks that claim on every
+build. Here the claim covers `mimecode` and the `@value` half of
+`mimesniff`.
 
 A firmware HTTP server answering `GET /logo.png` off a flash filesystem
-needs one thing from this package — the nine bytes `image/png` — and
-what it cannot do is build them: a `MimeType` holds spans into a string,
-and a device with no heap has no string to span. So the device path is
-integers: a code out of the extension, or a code out of the first bytes,
-and `code_name` at the end producing a constant that lives in flash.
+needs the nine bytes `image/png` and cannot build a `MimeType`, which
+holds ranges into a string a device with no heap does not have. The
+device path is integers instead: a code from the extension or from the
+first bytes, and `mimecode.code_name` at the end, producing a constant
+that lives in flash.
 
-The sniffer's `@value` machine is the same table walk `sniff` does,
-called from two places rather than implemented twice — the suite checks
-that they agree on every vector. A device feeds it the bytes it was
-already reading and stops as soon as `sniff_settled` answers `true`,
-which for a PNG is eight bytes rather than 1445.
+```bash
+novo build --target=nrf52-qemu tests/embedded_probe.nv
+```
 
-`mimetype`, `mimeext` and `mimeaccept` are **not** claimed: a parsed
-type is a list of parameter spans, the extension table is six hundred
-strings, and negotiation builds a ranked list. All three allocate by
-construction.
+That command builds a Cortex-M4 executable today.
 
-## The layer, and the two absent dependencies
+`MimeSniff` is the same table walk that `sniff` performs, as a `@value`
+struct the caller carries. A device feeds it the bytes it is already
+reading and stops when `sniff_settled` answers `true`, which for a PNG
+is eight bytes rather than 1445. The suite checks that the two agree on
+every vector.
 
-`core` — no effects. This package is **handed** the first bytes of a
-file; it never opens one. The `Content-Type` it parses is a string the
-caller already has.
+The codes are functions returning integers rather than an enum. A
+`@value` struct's fields are scalars only (SPEC section 14.5), and the
+sniffer's state holds a code. A function returning a literal compiles
+to the literal.
 
-**http-codec-nv is not a dependency.** A `Content-Type` is a header
-*value*, and a header value is a string; which header it came out of is
-the business of whatever parsed the message. That is what lets the
-standard library's `HttpHeader`, http-codec-nv's `H1Headers` and a
-device's own eight-line parser all hand it the same string.
+`mimetype`, `mimeext` and `mimeaccept` are outside the claim. A parsed
+type is a list of parameter ranges, the extension table is several
+hundred strings, and negotiation builds a ranked list.
 
-**unicode-nv is not one either, and the absence is a finding.** RFC 2045
-defines a media type's grammar over ASCII and browsers compare type and
-subtype ASCII-case-insensitively, deliberately — so `TEXT/HTML` and
-`text/html` are one type with no Unicode table anywhere. The one place a
-caller might expect Unicode is the `charset` parameter, and a charset
-*name* is an ASCII label registered with IANA; what the label **means**
-is a decoder's business.
+## What is not included
 
-## What this replaces, and what it would take
-
-`compiler/stdlib/http_server.nv`'s `http_server_mime_type` is a
-twenty-branch `match` over `path.ext`, and it is the whole of the
-standard library's media-type support. It has no parser, no sniffer and
-no negotiation, so a server built on it cannot answer *"is this request
-body JSON?"* without comparing header strings, cannot decide a type for
-a file with no extension, and cannot honour an `Accept`.
-
-Adopting this deletes that `match` and gives the same servers the other
-three. `orbit/static-site-generator` is the second consumer: it writes
-files whose type it knows and would use `mimeext.preferred_ext` to name
-them, which is the reverse direction and the one a generator needs.
-
-## Where the names come from
-
-Public type names are unique across the whole assembly, dependencies
-included.
-
-| here | the obvious name | why not |
-| --- | --- | --- |
-| `MimeType` | `MediaType`, `ContentType` | both are names a future HTTP package will want, and `Type` is impossible |
-| `MimeParam` | `Param` | `HttpParam` is the standard library's and `Param` is what four packages want |
-| `MimeSpan` | `Span` | url-nv publishes `Span`, and it is a module name in use |
-| `MimeRange` | `Range` | generic, and a byte range is a different thing in the same domain |
-| `MimeSniff` | `Sniffer`, `Scanner` | generic |
-| `MimeError` | `ParseError` | every parser on the grid wants it |
-| module `mimetype`, `mimeext`, … | `mime`, `types`, `ext`, `sniff`, `accept` | all five are names another package will want, and a bare `mime` would collide with a future multipart package's own module |
-
-The codes are **functions returning integers** rather than an enum,
-which looks odd until the device is in view: an enum is not a position a
-`@value` sniffer's state may occupy (SPEC § 14.5), and the state has to
-hold one. A function returning a literal compiles to the literal.
-
-## The reference implementation
-
-**`mime_guess`** for the extension table, which is Apache's
-`mime.types` — and the reason to take somebody else's list rather than
-curate one is that a curated list disagrees with the server in front of
-it. **Python's `mimetypes`** for the two-way lookup and for the
-observation that the reverse direction has to be a list. **The WHATWG
-MIME Sniffing standard** for the pattern table, its order, the
-sniffable-type set and the `nosniff` rule. **RFC 2045 § 5.1** for the
-grammar, **RFC 6839** for the `+suffix`, and **RFC 9110 § 12.5.1** for
-negotiation.
-
-The oracles are the WHATWG standard's own pattern table, the
-`mime_guess` extension list, and RFC 9110's `Accept` examples.
-
-Deliberately left out, and where it goes instead:
-
-- **Reading a file.** `core`; this package is handed the head.
-- **Charset decoding.** A charset name is a label here; turning
-  Windows-1252 bytes into text is an encoding package's job.
-- **Multipart bodies.** `form-nv`'s row on the plan. This package
-  answers the `boundary`; parsing what it delimits is a different
-  parser.
-- **The image, audio and video sniffing tables' full pattern sets.**
-  `MimeSniffContext` is the seam and the general table is implemented;
-  the context-specific tables are each a different table selected by how
-  the resource was requested.
+- **Reading a file.** This package declares no effects and is handed
+  the first bytes.
+- **Charset decoding.** A charset name is a label here. Turning
+  Windows-1252 bytes into text belongs to an encoding package.
+- **Multipart bodies.** This package answers the `boundary` parameter.
+  [form-nv](https://novo-lang.org/packages/form-nv) parses what it
+  delimits.
+- **The full context-specific sniffing tables.** The general table is
+  implemented and `MimeSniffContext` is where the others attach. The
+  image and audio-or-video tables are each a different table chosen by
+  how the resource was requested.
 - **`Content-Disposition`.** A different header with a different
-  grammar, and RFC 6266's filename rules are their own package.
-- **An IANA registry mirror.** The full registry is thousands of types
-  with its own update cadence, and a copy compiled in here would be
-  stale the day it published.
+  grammar, whose filename rules are RFC 6266's.
+- **A mirror of the IANA media type registry.** It is thousands of
+  types with its own update cadence, and a copy compiled in here would
+  be stale the day it published.
+- **A dependency on an HTTP package.** A `Content-Type` is a header
+  value, which is a string. Which header it came out of belongs to
+  whatever parsed the message.
 
-## Status
+## Related packages
 
-Every function is `todo()`. Two suites, both red, both for the same
-reason — every assertion reaches `not implemented: mime-nv.<fn>`, which
-is the expected result until the bodies land.
+- [form-nv](https://novo-lang.org/packages/form-nv) parses
+  `multipart/form-data` bodies, and asks this package for the boundary.
+- [static-nv](https://novo-lang.org/packages/static-nv) serves files
+  over HTTP, and needs a type for each one.
+- [http-codec-nv](https://novo-lang.org/packages/http-codec-nv) reads
+  and writes HTTP/1.1 messages, and hands over the `Content-Type` and
+  `Accept` values this package parses. This package does not depend on
+  it.
+- [html-nv](https://novo-lang.org/packages/html-nv) is what to parse a
+  body with once this package has said it is HTML.
+- `std.http_server` in the standard library answers a media type from a
+  file extension with a twenty-branch match, and has no parser, no
+  sniffer and no negotiation.
 
+## Tests
+
+```bash
+novo test tests/mimetype_tests.nv    # the grammar, the essence, the extension table
+novo test tests/mimesniff_tests.nv   # the pattern table, nosniff, and Accept
 ```
-novo test --isolate tests/mimetype_tests.nv    # the grammar, the essence, the extension table
-novo test --isolate tests/mimesniff_tests.nv   # the pattern table, nosniff, and Accept
-```
 
-`tests/embedded_probe.nv` is not a test: it is the device claim, built
-for `--target=nrf52-qemu` by the audit's `core-embedded` row.
+The pattern table, its order, the sniffable-type set and the `nosniff`
+rule are the WHATWG MIME Sniffing Standard's own. The extension table
+is Apache's `mime.types` by way of the Rust crate `mime_guess`; taking
+somebody else's list matters because a curated one disagrees with the
+server in front of it. Python's `mimetypes` is the reference for the
+two-way lookup. The grammar is RFC 2045 section 5.1, the `+suffix` is
+RFC 6839, and the negotiation examples are RFC 9110 section 12.5.1's.
 
-`novo doc` renders and its examples compile.
+The suite asserts that `text/html` and `TEXT/HTML; charset=utf-8` have
+one essence, that a quoted boundary survives verbatim, that a duplicate
+parameter is kept, that a supplied `image/png` is not overridden by
+sniffing, that `nosniff` suppresses sniffing entirely, that
+specificity beats quality, that `q=0` is a refusal and an empty header
+is not, and that the `@value` sniffer and `sniff` agree on every
+vector.
+
+`tests/embedded_probe.nv` is the device claim as a program. It builds a
+Cortex-M4 executable against `mimecode` and the `@value` sniffer.
+
+The tests compile today and fail at run, each on the
+`not implemented: mime-nv.<module>.<fn>` panic that is its body. That
+is the expected state of an interface release. They turn green one at a
+time as bodies land.
+
+## Implementation status
+
+| Item | Implemented |
+| --- | --- |
+| `mimetype.MimeSpan`, `.MimeParam`, `.MimeType`, `.MimeError`, `mimesniff.MimeSniffContext`, `.MimeSniff`, `mimeaccept.MimeRange` | the types are declared |
+| `mimecode.unknown` and the twenty named code functions | no |
+| `mimecode.code_name`, `.code_named`, `.code_charset`, `.code_is_inline`, `.code_is_text`, `.code_count`, `.code_at` | no |
+| `mimetype.parse`, `.parse_bounded`, `.print`, `.build` | no |
+| `mimetype.type_of`, `.subtype_of`, `.suffix_of`, `.essence`, `.essence_eq`, `.span_str` | no |
+| `mimetype.param`, `.param_str`, `.charset`, `.boundary` | no |
+| `mimetype.token_byte_ok`, `.needs_quoting`, `.quote`, `.unquote`, `MimeError.message` | no |
+| `mimeext.code_for_ext`, `.type_for_ext`, `.type_for_name`, `.code_for_name`, `.ext_of`, `.knows_ext` | no |
+| `mimeext.exts_for_type`, `.preferred_ext`, `.ext_count`, `.ext_at` | no |
+| `mimesniff.header_bytes`, `.sniff`, `.sniff_with`, `.would_sniff`, `.is_sniffable_type` | no |
+| `mimesniff.looks_binary`, `.bom_charset`, `.bom_len` | no |
+| `mimesniff.context_code`, `.sniff_start`, `.sniff_byte`, `.sniff_end` | no |
+| `mimesniff.sniff_settled`, `.sniff_code`, `.sniff_binary`, `.sniff_pos` | no |
+| `mimeaccept.parse_accept`, `.best`, `.best_bounded`, `.best_of` | no |
+| `mimeaccept.quality_of`, `.range_matches`, `.specificity`, `.range_of` | no |
+| `mimeaccept.print_range`, `.print_accept`, `.vary_header` | no |
+
+## Licence
+
+Apache-2.0. See `LICENSE`.
+
+<!-- docs/writing-a-readme.md is the style guide for this page. -->

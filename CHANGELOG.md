@@ -5,6 +5,10 @@ All notable changes to mime-nv are recorded here. The format is
 package follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 with the pre-1.0 rule that a breaking change bumps the MINOR number.
 
+## 0.0.2 — 2026-09-15
+
+README rewritten to the package README style guide (docs/writing-a-readme.md); no change to the interface.
+
 ## 0.0.1 — 2026-09-11
 
 The **interface**: every signature and every effect row, and no bodies.
@@ -46,3 +50,24 @@ The **interface**: every signature and every effect row, and no bodies.
   three modules allocate by construction.
 - **No dependencies.** http-codec-nv and unicode-nv are both absent on
   purpose; the README says why for each.
+
+### Design notes
+
+Public type names are unique across a whole assembly, dependencies
+included, so every type here is prefixed. `MimeType` rather than
+`MediaType` or `ContentType`, both of which a future HTTP package will
+want; `MimeParam` because `HttpParam` is the standard library's;
+`MimeSpan` because url-nv publishes `Span`; `MimeRange` because a byte
+range is a different thing in the same domain; `MimeError` because
+every parser wants `ParseError`. The modules are prefixed for the same
+reason, and because a bare `mime` would collide with a future multipart
+package's own module.
+
+The named first consumer is `compiler/stdlib/http_server.nv`, whose
+`http_server_mime_type` is a twenty-branch match over a path extension
+and is the whole of the standard library's media-type support. A server
+built on it cannot answer whether a request body is JSON without
+comparing header strings, cannot decide a type for a file with no
+extension, and cannot honour an `Accept`.
+`orbit/static-site-generator` is the second, and wants
+`mimeext.preferred_ext`, which is the reverse direction.
