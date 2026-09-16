@@ -291,8 +291,9 @@ specificity beats quality, that `q=0` is a refusal and an empty header
 is not, and that the `@value` sniffer and `sniff` agree on every
 vector.
 
-`tests/embedded_probe.nv` is the device claim as a program. It builds a
-Cortex-M4 executable against `mimecode` and the `@value` sniffer.
+`tests/embedded_probe.nv` is the program that shows these modules build
+for a microcontroller with no heap allocator. It builds a Cortex-M4
+executable against `mimecode` and the `@value` sniffer.
 
 The tests compile today and fail at run, each on the
 `not implemented: mime-nv.<module>.<fn>` panic that is its body. That
