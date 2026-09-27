@@ -216,15 +216,13 @@ pub fn parse_bounded(input: Str, max_params: Int, max_bytes: Int) -> Result<Mime
             return Err(MimeBadToken(k, at(input, k)))
         let p0 = skip_ows(input, k + 1)
         i = p0
-        if p0 < n and at(input, p0) != ';'
-            match param_at(input, p0)
-                Err(e) =>
-                    return Err(e)
-                Ok(p)  =>
-                    if list.len(params) >= max_params
-                        return Err(MimeTooLong(max_params))
-                    list.push(params, p)
-                    i = p.value.start + p.value.len
+        if p0 >= n or at(input, p0) == ';'
+            continue
+        let p = param_at(input, p0)!
+        if list.len(params) >= max_params
+            return Err(MimeTooLong(max_params))
+        list.push(params, p)
+        i = p.value.start + p.value.len
     Ok(MimeType { type_span: MimeSpan { start: t0, len: t1 - t0 },
                   subtype_span: MimeSpan { start: s0, len: s1 - s0 },
                   suffix_span: suffix, params: params })
