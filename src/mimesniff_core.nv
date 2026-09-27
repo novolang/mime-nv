@@ -1,0 +1,574 @@
+// mimesniff_core.nv — the WHATWG MIME Sniffing Standard's pattern
+// tables, walked one byte at a time.
+//
+// A sniff is a `@value` state of integers that a caller feeds the first
+// bytes of a resource, one at a time.  It holds no buffer.  It answers
+// as soon as the prefix decides the type, which for a PNG is after
+// eight bytes.  `mimesniff.sniff` is this walk fed from a `Bytes`, so
+// the host answer and the device answer come from one table.
+//
+// This module is the half of the sniffer a microcontroller can run.
+// The `mimesniff` module takes `Bytes` and `Str`, which the embedded
+// runtime does not define, and one host-only function in a compilation
+// unit is an undefined symbol at link time whether or not a firmware
+// calls it.  Every function here carries `@tier(embedded)`.
+//
+// The tables are the standard's own (sections 6 and 7), in its order,
+// because the order decides the answer when two rows could match.  Each
+// row is a byte pattern, a mask, and whether leading whitespace is
+// skipped.  The rows are numbered by precedence, and a row that has
+// matched wins as soon as no row before it can still match.
+//
+//   rows 0 to 16   the HTML rows, each followed by a tag-terminating
+//                  byte (a space or `>`)
+//   row 17         `<?xml`
+//   row 18         `%PDF-`
+//   rows 19 to 22  PostScript and the three byte order marks
+//   rows 23 to 30  the image rows (section 6.1)
+//   rows 31 to 38  the audio and video rows (section 6.2), with the MP4
+//                  and WebM signatures as rows 37 and 38
+//   rows 39 to 41  the archive rows (section 6.4)
+//   rows 42 to 44  the two- and three-byte byte order marks of the
+//                  text-or-binary rules (section 7.2)
+//
+// The standard's third audio signature, "MP3 without ID3" (section
+// 6.2.3), is left out.  As written it compares the frame size against
+// `s - length`, which is never positive, so it never matches.  An MP3
+// with an ID3 tag is row 32.
+//
+// A pattern is kept as hexadecimal text and read with
+// `str.byte_at_or`, the one string read the embedded runtime admits.  A
+// list literal would be a heap allocation.
+
+use mimecode
+
+// How many bytes the standard reads before it decides (section 5.2).
+const LIMIT: Int = 1445
+
+// The number of rows.
+const ROWS: Int = 45
+
+// The two rows that are signatures computed over the bytes rather than
+// patterns.
+const MP4: Int = 37
+const WEBM: Int = 38
+
+// What one row does with one byte.
+const ALIVE: Int = 0
+const MATCHED: Int = 1
+const DEAD: Int = 2
+
+// A sniff in progress: the table walk as `@value` state.
+//
+// Every field is an integer or a flag, and the struct lives in the
+// caller's stack frame.  A caller reads it through the functions below
+// rather than through its fields, which describe the walk and not the
+// answer.
+pub @value
+struct MimeSniff
+    // How many bytes have been fed and counted.
+    pos: Int
+    // Which table is walked, as one of the `ctx_` codes.
+    ctx_code: Int
+    // The code the walk settled on, or `mimecode.unknown()` before it
+    // settles.
+    code: Int
+    // The rows that can still match, one bit per row.
+    alive: Int
+    // The row with the highest precedence that has matched, or -1.
+    best: Int
+    // How many leading whitespace bytes the HTML and XML rows skipped.
+    lead: Int
+    // The MP4 signature's state: the box size times four, plus a bit
+    // for a brand being matched and a bit for a brand found.
+    mp4: Int
+    // The WebM signature's state: a step number in the low four bits
+    // and a count above them.
+    webm: Int
+    // Whether any byte so far is one the standard calls binary.
+    binary: Bool
+    // Whether the walk has decided.
+    settled: Bool
+
+// How many leading bytes the standard ever reads: 1445 (section 5.2).
+//
+// A walk that has been fed this many bytes settles as though the
+// resource had ended, and further bytes change nothing.
+pub @tier(embedded)
+fn header_bytes() -> Int
+    LIMIT
+
+// The context code for the general algorithm, "rules for identifying
+// an unknown MIME type" with the sniff-scriptable flag set (section
+// 7.1): every row, then text or binary.
+pub @tier(embedded)
+fn ctx_browsing() -> Int
+    0
+
+// The context code for the rules for distinguishing whether a resource
+// is text or binary (section 7.2).  The answer is `text/plain` or
+// `application/octet-stream` and nothing else.
+pub @tier(embedded)
+fn ctx_text_or_binary() -> Int
+    1
+
+// The context code for the image rows alone (section 6.1).
+pub @tier(embedded)
+fn ctx_image() -> Int
+    2
+
+// The context code for the audio and video rows alone (section 6.2).
+pub @tier(embedded)
+fn ctx_audio_video() -> Int
+    3
+
+// The context code for the general algorithm with the sniff-scriptable
+// flag unset: the HTML, XML and PDF rows are skipped.
+//
+// The standard runs this when a response with no usable type was sent
+// with `X-Content-Type-Options: nosniff` (section 7, step 2).
+pub @tier(embedded)
+fn ctx_browsing_unscriptable() -> Int
+    4
+
+// The rows `lo` to `hi`, as bits.
+@tier(embedded)
+fn rows(lo: Int, hi: Int) -> Int
+    (1 << (hi + 1)) - 1 - ((1 << lo) - 1)
+
+// The rows a context walks.  A code that is not one of the five walks
+// the general table.
+@tier(embedded)
+fn table_for(ctx: Int) -> Int
+    if ctx == 1
+        return rows(42, 44)
+    if ctx == 2
+        return rows(23, 30)
+    if ctx == 3
+        return rows(31, 38)
+    if ctx == 4
+        return rows(19, 41)
+    rows(0, 41)
+
+// Whether a context ends in the text-or-binary answer when no row
+// matches.  The image and audio-video contexts answer
+// `mimecode.unknown()` instead.
+@tier(embedded)
+fn falls_back(ctx: Int) -> Bool
+    ctx != 2 and ctx != 3
+
+// A row's byte pattern, as hexadecimal text.  Rows 37 and 38 are
+// computed signatures and have no pattern; row 44 is the last.
+@tier(embedded)
+fn pattern(k: Int) -> Str
+    match k
+        0  => "3C21444F43545950452048544D4C"
+        1  => "3C48544D4C"
+        2  => "3C48454144"
+        3  => "3C534352495054"
+        4  => "3C494652414D45"
+        5  => "3C4831"
+        6  => "3C444956"
+        7  => "3C464F4E54"
+        8  => "3C5441424C45"
+        9  => "3C41"
+        10 => "3C5354594C45"
+        11 => "3C5449544C45"
+        12 => "3C42"
+        13 => "3C424F4459"
+        14 => "3C4252"
+        15 => "3C50"
+        16 => "3C212D2D"
+        17 => "3C3F786D6C"
+        18 => "255044462D"
+        19 => "252150532D41646F62652D"
+        20 => "FEFF0000"
+        21 => "FFFE0000"
+        22 => "EFBBBF00"
+        23 => "00000100"
+        24 => "00000200"
+        25 => "424D"
+        26 => "474946383761"
+        27 => "474946383961"
+        28 => "5249464600000000574542505650"
+        29 => "89504E470D0A1A0A"
+        30 => "FFD8FF"
+        31 => "464F524D0000000041494646"
+        32 => "494433"
+        33 => "4F67675300"
+        34 => "4D54686400000006"
+        35 => "524946460000000041564920"
+        36 => "524946460000000057415645"
+        39 => "1F8B08"
+        40 => "504B0304"
+        41 => "526172211A0700"
+        42 => "FEFF"
+        43 => "FFFE"
+        _  => "EFBBBF"
+
+// A row's mask, as hexadecimal text, or `""` when every byte is
+// significant.  The HTML rows' masks are not here: they are `DF` over
+// a letter and `FF` elsewhere, which `step` computes.
+@tier(embedded)
+fn mask(k: Int) -> Str
+    if k == 20 or k == 21
+        return "FFFF0000"
+    if k == 22
+        return "FFFFFF00"
+    if k == 28
+        return "FFFFFFFF00000000FFFFFFFFFFFF"
+    if k == 31 or k == 35 or k == 36
+        return "FFFFFFFF00000000FFFFFFFF"
+    ""
+
+// The code a row answers.
+@tier(embedded)
+fn row_code(k: Int) -> Int
+    if k <= 16
+        return mimecode.text_html()
+    if k == 17
+        return mimecode.text_xml()
+    if k == 18
+        return mimecode.application_pdf()
+    if k == 19
+        return mimecode.application_postscript()
+    if k <= 22
+        return mimecode.text_plain()
+    if k <= 24
+        return mimecode.image_x_icon()
+    if k == 25
+        return mimecode.image_bmp()
+    if k <= 27
+        return mimecode.image_gif()
+    if k == 28
+        return mimecode.image_webp()
+    if k == 29
+        return mimecode.image_png()
+    if k == 30
+        return mimecode.image_jpeg()
+    if k == 31
+        return mimecode.audio_aiff()
+    if k == 32
+        return mimecode.audio_mpeg()
+    if k == 33
+        return mimecode.application_ogg()
+    if k == 34
+        return mimecode.audio_midi()
+    if k == 35
+        return mimecode.video_avi()
+    if k == 36
+        return mimecode.audio_wave()
+    if k == 37
+        return mimecode.video_mp4()
+    if k == 38
+        return mimecode.video_webm()
+    if k == 39
+        return mimecode.application_gzip()
+    if k == 40
+        return mimecode.application_zip()
+    if k == 41
+        return mimecode.application_x_rar_compressed()
+    mimecode.text_plain()
+
+// The value of one hexadecimal digit.
+@tier(embedded)
+fn digit(c: Int) -> Int
+    if c >= '0' and c <= '9'
+        return c - '0'
+    c - 'A' + 10
+
+// The byte at index `i` of a hexadecimal text.
+@tier(embedded)
+fn hex_at(text: Str, i: Int) -> Int
+    digit(str.byte_at_or(text, 2 * i, '0')) * 16 + digit(str.byte_at_or(text, 2 * i + 1, '0'))
+
+// Whether a byte is one of the standard's whitespace bytes: tab, line
+// feed, form feed, carriage return and space (section 3).
+@tier(embedded)
+fn is_ws(b: Int) -> Bool
+    b == '\t' or b == '\n' or b == 12 or b == '\r' or b == ' '
+
+// Whether a byte is a binary data byte (section 3): 0x00 to 0x08, 0x0B,
+// 0x0E to 0x1A, and 0x1C to 0x1F.
+@tier(embedded)
+fn is_binary(b: Int) -> Bool
+    if b <= 8 or b == 11
+        return true
+    b >= 14 and b <= 26 or b >= 28 and b <= 31
+
+// What row `k` does with byte `b` at offset `d` into its pattern.
+//
+// The HTML rows, 0 to 16, compare letters ASCII case-insensitively and
+// end with one tag-terminating byte, a space or `>`.
+@tier(embedded)
+fn step(k: Int, d: Int, b: Int) -> Int
+    let pat = pattern(k)
+    let n = str.len(pat) / 2
+    let html = k <= 16
+    if d >= n
+        if b == ' ' or b == '>'
+            return MATCHED
+        return DEAD
+    let want = hex_at(pat, d)
+    var m = 255
+    if html and want >= 'A' and want <= 'Z'
+        m = 223
+    let ms = mask(k)
+    if str.len(ms) > 0
+        m = hex_at(ms, d)
+    if (b & m) != want
+        return DEAD
+    if d == n - 1 and not html
+        return MATCHED
+    ALIVE
+
+// One byte of the MP4 signature (section 6.2.1).  Answers the new
+// state, or -1 once the signature cannot match, or -2 once it has.
+//
+// The first four bytes are the box size.  Bytes 4 to 7 are `ftyp`.
+// The major brand is at byte 8 and the compatible brands at 16, 20,
+// and so on below the box size; any of them reading `mp4` matches, once
+// the resource is at least twelve bytes and at least the box size.
+@tier(embedded)
+fn mp4_step(state: Int, p: Int, b: Int) -> Int
+    if p < 4
+        let size = (state >> 2) * 256 + b
+        if p == 3 and (size % 4 != 0 or size > LIMIT)
+            return 0 - 1
+        return size << 2
+    let size = state >> 2
+    var flags = state & 3
+    if p < 8
+        if b != str.byte_at_or("ftyp", p - 4, 0)
+            return 0 - 1
+        return state
+    var q = 0 - 1
+    if p <= 10
+        q = p - 8
+    else if p >= 16 and (p & 3) < 3 and p - (p & 3) < size
+        q = p & 3
+    if q >= 0
+        let ok = b == str.byte_at_or("mp4", q, 0) and (q == 0 or (flags & 1) == 1)
+        flags = flags & 2
+        if ok
+            flags = flags | 1
+            if q == 2
+                flags = flags | 2
+    if (flags & 2) != 0
+        if p + 1 >= 12 and p + 1 >= size
+            return 0 - 2
+        return (size << 2) | flags
+    var next = 16
+    if p >= 16
+        next = p - (p & 3) + 4
+    let in_slot = q >= 0 and q < 2 and (flags & 1) == 1
+    if not in_slot and p >= 10 and next >= size
+        return 0 - 1
+    (size << 2) | flags
+
+// How many bytes an EBML variable-length integer takes, read from its
+// first byte: one more than the count of leading zero bits, at most
+// eight (section 6.2.2, "parse a vint").
+@tier(embedded)
+fn vint_size(b: Int) -> Int
+    var size = 1
+    var m = 128
+    for _ in 0..7
+        if (b & m) != 0
+            return size
+        m = m >> 1
+        size = size + 1
+    size
+
+// One byte of the WebM signature (section 6.2.2).  Answers the new
+// state, or -1 once the signature cannot match, or -2 once it has.
+//
+// The steps, in the low four bits of the state:
+//   0  the EBML magic `1A 45 DF A3`, at bytes 0 to 3
+//   1  looking for `42 82`, the DocType element, starting below byte 38
+//   2  the byte before was `42`
+//   3  the first byte of the element's size
+//   4  the rest of the size, with the count of bytes left above the step
+//   5  zero bytes before the name, with their count above the step
+//   6  `webm`, with the bytes matched and whether zeros came first above
+//   7  `webm` matched with no zeros before it, waiting for one more byte
+//
+// The last step is the standard's condition that the size ends before
+// `length - 4`.  With zeros before the name that holds already.
+@tier(embedded)
+fn webm_step(state: Int, p: Int, b: Int) -> Int
+    let at = state & 15
+    let n = state >> 4
+    if at == 0
+        if b != hex_at("1A45DFA3", p)
+            return 0 - 1
+        if p == 3
+            return 1
+        return 0
+    if at == 1 or at == 2
+        if at == 2 and b == 130
+            return 3
+        if b == 66 and p < 38
+            return 2
+        if p >= 38
+            return 0 - 1
+        return 1
+    if at == 3
+        let size = vint_size(b)
+        if size == 1
+            return 5
+        return (size - 1) * 16 + 4
+    if at == 4
+        if n == 1
+            return 5
+        return (n - 1) * 16 + 4
+    if at == 5
+        if b == 0
+            return (n + 1) * 16 + 5
+        if b == 'w'
+            if n > 0
+                return 9 * 16 + 6
+            return 16 + 6
+        return 0 - 1
+    if at == 6
+        let got = n & 7
+        if b != str.byte_at_or("webm", got, 0)
+            return 0 - 1
+        if got == 3
+            if (n & 8) != 0
+                return 0 - 2
+            return 7
+        return (n + 1) * 16 + 6
+    0 - 2
+
+// A walk that has decided on `code`.
+@tier(embedded)
+fn done(s: MimeSniff, code: Int) -> MimeSniff
+    MimeSniff { pos: s.pos, ctx_code: s.ctx_code, code: code, alive: 0, best: s.best,
+                lead: s.lead, mp4: s.mp4, webm: s.webm, binary: s.binary, settled: true }
+
+// Settle the walk if the bytes so far decide it.  `ended` says the
+// resource has no more bytes, which kills every row still waiting.
+@tier(embedded)
+fn settle(s: MimeSniff, ended: Bool) -> MimeSniff
+    if s.best >= 0
+        if ended or (s.alive & ((1 << s.best) - 1)) == 0
+            return done(s, row_code(s.best))
+        return s
+    if s.alive != 0 and not ended
+        return s
+    if not falls_back(s.ctx_code) or s.binary
+        return done(s, mimecode.unknown())
+    if ended
+        return done(s, mimecode.text_plain())
+    s
+
+// A sniff before any byte, for one of the `ctx_` codes.
+//
+// ```novo
+// use mimecode
+// use mimesniff_core
+//
+// fn main() [io]
+//     var s = mimesniff_core.sniff_start(mimesniff_core.ctx_browsing())
+//     s = mimesniff_core.sniff_byte(s, 'B')
+//     s = mimesniff_core.sniff_byte(s, 'M')
+//     println(mimecode.code_name(mimesniff_core.sniff_code(s)))   // image/bmp
+// ```
+pub @tier(embedded)
+fn sniff_start(ctx_code: Int) -> MimeSniff
+    MimeSniff { pos: 0, ctx_code: ctx_code, code: mimecode.unknown(), alive: table_for(ctx_code),
+                best: 0 - 1, lead: 0, mp4: 0, webm: 0, binary: false, settled: false }
+
+// Feed one byte.
+//
+// Only the low eight bits of `byte` are read.  Once `sniff_settled`
+// answers `true`, further bytes change nothing and are not counted, so
+// a caller may stop reading.  The byte that brings the count to
+// `header_bytes()` settles the walk as though the resource had ended.
+pub @tier(embedded)
+fn sniff_byte(s: MimeSniff, byte: Int) -> MimeSniff
+    if s.settled
+        return s
+    let b = byte & 255
+    let p = s.pos
+    var alive = s.alive
+    var best = s.best
+    var lead = s.lead
+    var mp4 = s.mp4
+    var webm = s.webm
+    if lead == p and is_ws(b)
+        alive = alive & rows(0, 17)
+        lead = lead + 1
+    else
+        for k in 0..ROWS
+            let bit = 1 << k
+            if (alive & bit) != 0
+                var r = ALIVE
+                if k == MP4
+                    let next = mp4_step(mp4, p, b)
+                    mp4 = next
+                    r = ALIVE
+                    if next == 0 - 1
+                        r = DEAD
+                    if next == 0 - 2
+                        r = MATCHED
+                else if k == WEBM
+                    let next = webm_step(webm, p, b)
+                    webm = next
+                    r = ALIVE
+                    if next == 0 - 1
+                        r = DEAD
+                    if next == 0 - 2
+                        r = MATCHED
+                else if k <= 17
+                    r = step(k, p - lead, b)
+                else
+                    r = step(k, p, b)
+                if r != ALIVE
+                    alive = alive - bit
+                if r == MATCHED and (best < 0 or k < best)
+                    best = k
+    let next = MimeSniff { pos: p + 1, ctx_code: s.ctx_code, code: s.code, alive: alive,
+                           best: best, lead: lead, mp4: mp4, webm: webm,
+                           binary: s.binary or is_binary(b), settled: false }
+    settle(next, p + 1 >= LIMIT)
+
+// Tell the sniff the resource ended.
+//
+// A walk still waiting on a row settles: a matched row with nothing
+// ahead of it wins, and otherwise the context's fallback answers.  For
+// the general and text-or-binary contexts that is `text/plain` when no
+// binary data byte was seen and `application/octet-stream` when one
+// was.  An empty resource is therefore `text/plain` there, which is the
+// standard's answer.
+pub @tier(embedded)
+fn sniff_end(s: MimeSniff) -> MimeSniff
+    if s.settled
+        return s
+    settle(s, true)
+
+// Whether the walk has decided.
+pub @tier(embedded)
+fn sniff_settled(s: MimeSniff) -> Bool
+    s.settled
+
+// The code the walk settled on.
+//
+// `mimecode.unknown()` while the walk is undecided, and for a resource
+// the standard calls `application/octet-stream`.
+pub @tier(embedded)
+fn sniff_code(s: MimeSniff) -> Int
+    if s.settled
+        return s.code
+    mimecode.unknown()
+
+// Whether any byte fed so far is a binary data byte (section 3).
+pub @tier(embedded)
+fn sniff_binary(s: MimeSniff) -> Bool
+    s.binary
+
+// How many bytes have been fed and counted.
+pub @tier(embedded)
+fn sniff_pos(s: MimeSniff) -> Int
+    s.pos

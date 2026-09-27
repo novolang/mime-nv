@@ -1,72 +1,85 @@
-// mimesniff.nv — what the first bytes say, and when nobody is allowed
-// to ask.
+// mimesniff.nv — the WHATWG MIME Sniffing Standard over a resource's
+// first bytes, the type a server supplied, and `nosniff`.
 //
-// Every body here is a `todo()`; the signatures are the design.
+// Sniffing is working out what a resource is from its leading bytes.
+// Browsers do it because servers get `Content-Type` wrong, and the
+// standard fixes exactly when they may: the answer depends on the
+// bytes, on the supplied type and on the no-sniff flag, which
+// `X-Content-Type-Options: nosniff` sets.  `sniff_with` takes all
+// three.  `sniff` takes the bytes alone, for data that arrived with no
+// type at all.
 //
-// SNIFFING IS A SECURITY MECHANISM PRETENDING TO BE A CONVENIENCE.  A
-// browser sniffs because servers lie about `Content-Type`, and the
-// consequence is that a file a site let a user upload can be made to
-// run as HTML on that site's own origin — upload a `.txt` whose first
-// bytes are `<!DOCTYPE html>`, serve it as `text/plain`, and a browser
-// that sniffed would render it.  That is why
-// `X-Content-Type-Options: nosniff` exists, why it is a FLAG in this
-// module's signatures rather than a sentence in its README, and why
-// `sniff_with` takes the supplied type and the flag together: the
-// algorithm's answer depends on both, and a function that took only the
-// bytes would be answering a different question from the one a browser
-// asks.
+// The supplied type decides most of the answer (section 7):
 //
-// THE PATTERN TABLE IS THE WHATWG STANDARD'S, VERBATIM.  Byte patterns
-// with masks, in the standard's own order, because the order is
-// load-bearing: `%PDF-` is checked before the text patterns, and a
-// table sorted any other way gives different answers on the same file.
-// Its outputs are `mimecode` integers, which is what lets the same
-// table serve the host and a device.
+//   1. An HTML or XML type is kept.
+//   2. No type, or `unknown/unknown`, `application/unknown` or `*/*`,
+//      is sniffed with the whole table.  With `nosniff` the HTML, XML
+//      and PDF rows are skipped, but the rest still runs.
+//   3. Otherwise, with `nosniff`, the supplied type is kept.
+//   4. One of the four `text/plain` spellings an old Apache bug sends
+//      can only become `application/octet-stream`, never HTML.
+//   5. An image type can become another image type, and an audio or
+//      video type another audio or video type, when the bytes match.
+//   6. Anything else is kept.
 //
-// TWO SHAPES, ONE TABLE.  `sniff` takes the first bytes whole, which is
-// what a host has after a read.  `sniff_start`/`sniff_byte` is a
-// `@value` machine fed a byte at a time, which is what a device has:
-// eight integers in a stack frame, no buffer, and an answer as soon as
-// the prefix is decided.  They agree by construction — the machine IS
-// the table walk — and the suite checks that they do on every vector.
+// The pattern tables and the walk over them are `mimesniff_core`, which
+// a microcontroller can run.  This module feeds it from `Bytes`.
 //
-// WHAT IS NOT HERE: the standard's context-specific algorithms for
-// images, audio and video, and its font matching.  Each is a different
-// pattern table selected by how the resource was requested, and a
-// caller that has an `<img>` tag knows which one it wants.
-// `MimeSniffContext` is the seam; `MimeSniffBrowsing` is the general
-// table, which is the one a file server needs.
+// An answer is a `mimecode` integer.  When the answer is a supplied
+// type that has no code, it is `mimecode.unknown()`, and `would_sniff`
+// answering `false` tells a caller that its own string stands.
 
 use mimecode
+use mimesniff_core
+use mimetype
 
-// Which of the standard's tables to use.
+// Which of the standard's algorithms to run.
 pub enum MimeSniffContext
-    // The general algorithm: everything, in the standard's order. What
-    // a static-file server wants.
+    // The general algorithm (sections 7 and 8.1), which is what a
+    // browser runs for a page and what a file server wants.
     MimeSniffBrowsing
-    // Text or binary only — the standard's "sniff a text or binary
-    // resource" step. Answers `text/plain` or
+    // The rules for distinguishing whether a resource is text or binary
+    // (section 7.2).  The answer is `text/plain` or
     // `application/octet-stream` and nothing else.
     MimeSniffTextOrBinary
-    // The image table alone, for a resource requested as an image.
+    // Sniffing in an image context (section 8.2): the image rows
+    // alone.
     MimeSniffImage
-    // The audio-or-video table alone.
+    // Sniffing in an audio or video context (section 8.3): the audio
+    // and video rows alone.
     MimeSniffAudioVideo
 
-// How many leading bytes the algorithm ever looks at.
+// How many leading bytes the algorithm ever looks at: 1445, the
+// standard's resource header size (section 5.2).
 //
-// 1445, which is the standard's own resource header size — and the
-// number a caller reading a file for this needs, so that a server does
-// not read a gigabyte to decide a header.
+// A server reading a file to decide its type reads this many bytes and
+// no more.
 pub fn header_bytes() -> Int []
-    todo("mime-nv.mimesniff.header_bytes")
+    mimesniff_core.header_bytes()
 
-// What the bytes say, on their own.
+// The `mimesniff_core` context code for a context.
+pub fn context_code(ctx: MimeSniffContext) -> Int []
+    match ctx
+        MimeSniffBrowsing     => mimesniff_core.ctx_browsing()
+        MimeSniffTextOrBinary => mimesniff_core.ctx_text_or_binary()
+        MimeSniffImage        => mimesniff_core.ctx_image()
+        MimeSniffAudioVideo   => mimesniff_core.ctx_audio_video()
+
+// Run the walk for a context code over the first bytes of `head`.
+fn walk(head: Bytes, ctx_code: Int) -> Int
+    var s = mimesniff_core.sniff_start(ctx_code)
+    let n = bytes.len(head)
+    for i in 0..n
+        if mimesniff_core.sniff_settled(s)
+            break
+        s = mimesniff_core.sniff_byte(s, bytes.byte_at(head, i) ?? 0)
+    mimesniff_core.sniff_code(mimesniff_core.sniff_end(s))
+
+// What the bytes say, with no supplied type.
 //
-// The pure question, with no supplied type and no `nosniff` flag. Right
-// for a caller that has no `Content-Type` at all — a file off a disk, a
-// clipboard paste — and wrong for a caller that has one, which should
-// use `sniff_with`.
+// The general context runs the whole table with the HTML rows included,
+// which is what the standard does for a resource with no type (section
+// 7, step 2).  A caller that has a `Content-Type` uses `sniff_with`.
 //
 // ```novo
 // use mimecode
@@ -77,137 +90,192 @@ pub fn header_bytes() -> Int []
 //     println(mimecode.code_name(mimesniff.sniff(head, MimeSniffBrowsing)))
 // ```
 pub fn sniff(head: Bytes, ctx: MimeSniffContext) -> Int []
-    todo("mime-nv.mimesniff.sniff")
+    walk(head, context_code(ctx))
+
+// The parsed form of a supplied type, or `None` when the standard
+// treats it as undefined: empty, or not a media type at all (section
+// 5.1).
+fn supplied_type(supplied: Str) -> ?MimeType
+    match mimetype.parse(supplied)
+        Ok(m)  => Some(m)
+        Err(_) => None
+
+// Whether a parsed type is an XML MIME type: `text/xml`,
+// `application/xml`, or any subtype ending in `+xml`.
+fn is_xml(supplied: Str, m: MimeType) -> Bool
+    if mimetype.suffix_of(supplied, m) == "xml"
+        return true
+    mimetype.essence_eq(supplied, m, "text/xml") or mimetype.essence_eq(supplied, m, "application/xml")
+
+// Whether a parsed type is one the standard sniffs as though no type
+// had been supplied.
+fn is_unknown_type(supplied: Str, m: MimeType) -> Bool
+    if mimetype.essence_eq(supplied, m, "unknown/unknown")
+        return true
+    mimetype.essence_eq(supplied, m, "application/unknown") or mimetype.essence_eq(supplied, m, "*/*")
+
+// Whether a supplied type is one of the four exact byte strings that
+// set the standard's check-for-apache-bug flag (section 5.1).
+fn apache_bug(supplied: Str) -> Bool
+    if supplied == "text/plain" or supplied == "text/plain; charset=ISO-8859-1"
+        return true
+    supplied == "text/plain; charset=iso-8859-1" or supplied == "text/plain; charset=UTF-8"
 
 // What a browser would decide, given what the server said and whether
 // it said `nosniff`.
 //
-// The whole algorithm, and the signature is the argument: `supplied` is
-// the `Content-Type` the server sent and `nosniff` is
-// `X-Content-Type-Options: nosniff`. When `nosniff` is set the supplied
-// type wins outright — that is what the header MEANS — and the bytes
-// are not consulted at all. When it is not set, the standard's rules
-// decide, and they are not "the bytes win": a supplied type that is not
-// one of the sniffable ones is kept.
+// `supplied` is the `Content-Type` value the server sent, or `""` for
+// none.  The rules are the standard's (section 7, and 8.2 and 8.3 for
+// the image and audio-video contexts), and they are not "the bytes
+// win":
+//
+// - An HTML or XML type is kept.
+// - No type, `unknown/unknown`, `application/unknown` or `*/*` runs the
+//   whole table; `nosniff` removes the HTML, XML and PDF rows from it.
+// - Otherwise `nosniff` keeps the supplied type.
+// - `text/plain`, spelled as an old Apache server sends it, becomes
+//   `application/octet-stream` when the bytes are binary and stays
+//   `text/plain` otherwise.  It never becomes HTML.
+// - An image type can become another image type, and an audio or video
+//   type another audio or video type.
+// - Anything else is kept.
+//
+// The text-or-binary context runs section 7.2's rules unless the
+// supplied type is HTML or XML or `nosniff` is set.  The image and
+// audio-video contexts keep an XML type and otherwise answer the
+// pattern that matched or the supplied type.
+//
+// ```novo
+// use mimecode
+// use mimesniff
+//
+// fn main() [io]
+//     let page = bytes.from_str("<!DOCTYPE html><p>hello")
+//     // No type at all: the bytes are sniffed, and they are HTML.
+//     println(mimecode.code_name(mimesniff.sniff_with(page, "", false, MimeSniffBrowsing)))
+//     // Served as text/plain: a browser never makes that HTML.
+//     println(mimecode.code_name(mimesniff.sniff_with(page, "text/plain", false, MimeSniffBrowsing)))
+// ```
 pub fn sniff_with(head: Bytes, supplied: Str, nosniff: Bool, ctx: MimeSniffContext) -> Int []
-    todo("mime-nv.mimesniff.sniff_with")
+    let kept = mimecode.code_named(supplied)
+    match supplied_type(supplied)
+        None    =>
+            match ctx
+                MimeSniffBrowsing =>
+                    if nosniff
+                        return walk(head, mimesniff_core.ctx_browsing_unscriptable())
+                    walk(head, mimesniff_core.ctx_browsing())
+                _                 => sniff(head, ctx)
+        Some(m) =>
+            if is_xml(supplied, m)
+                return kept
+            match ctx
+                MimeSniffBrowsing     => sniff_browsing(head, supplied, m, nosniff)
+                MimeSniffTextOrBinary =>
+                    if nosniff or mimetype.essence_eq(supplied, m, "text/html")
+                        return kept
+                    sniff(head, ctx)
+                MimeSniffImage        => matched_or(sniff(head, ctx), kept)
+                MimeSniffAudioVideo   => matched_or(sniff(head, ctx), kept)
 
-// Whether the algorithm would consult the bytes at all, given a
-// supplied type and the flag.
+// The pattern that matched, or the supplied type's code when none did.
+fn matched_or(found: Int, kept: Int) -> Int
+    if found == mimecode.unknown()
+        return kept
+    found
+
+// Section 7 for a supplied type that parsed and is not XML.
+fn sniff_browsing(head: Bytes, supplied: Str, m: MimeType, nosniff: Bool) -> Int
+    let kept = mimecode.code_named(supplied)
+    if mimetype.essence_eq(supplied, m, "text/html")
+        return kept
+    if is_unknown_type(supplied, m)
+        if nosniff
+            return walk(head, mimesniff_core.ctx_browsing_unscriptable())
+        return walk(head, mimesniff_core.ctx_browsing())
+    if nosniff
+        return kept
+    if apache_bug(supplied)
+        return walk(head, mimesniff_core.ctx_text_or_binary())
+    let family = mimetype.type_of(supplied, m)
+    if family == "image"
+        return matched_or(walk(head, mimesniff_core.ctx_image()), kept)
+    if family == "audio" or family == "video"
+        return matched_or(walk(head, mimesniff_core.ctx_audio_video()), kept)
+    kept
+
+// Whether a browser would consult the bytes at all, given a supplied
+// type and the flag, in the general context.
 //
-// The question a server asks about its OWN response: if this answers
-// `true`, a client may decide the response is something other than what
-// was said, and an upload endpoint that does not want that sends
-// `nosniff`.
+// A server asks this about its own response.  `true` means a client may
+// decide the response is something other than what was said.  A missing
+// or unknown type is sniffed even with `nosniff`, which only removes
+// the HTML, XML and PDF rows; the way to stop sniffing is to supply a
+// real type and `nosniff` together.
 pub fn would_sniff(supplied: Str, nosniff: Bool) -> Bool []
-    todo("mime-nv.mimesniff.would_sniff")
+    match supplied_type(supplied)
+        None    => true
+        Some(m) =>
+            if is_xml(supplied, m) or mimetype.essence_eq(supplied, m, "text/html")
+                return false
+            if is_unknown_type(supplied, m)
+                return true
+            if nosniff
+                return false
+            if apache_bug(supplied)
+                return true
+            let family = mimetype.type_of(supplied, m)
+            family == "image" or family == "audio" or family == "video"
 
-// Whether a supplied type is one the standard lets a browser override.
+// Whether a supplied type counts as no type at all, so that the whole
+// table decides (section 7, step 2).
 //
-// `text/plain`, `application/octet-stream`, `unknown/unknown`,
-// `*/*` and an absent type. Everything else is kept as supplied, which
-// is the fact most descriptions of sniffing leave out.
+// That is `""`, a value that is not a media type, `unknown/unknown`,
+// `application/unknown` and `*/*`.  Every other type is kept or changed
+// only within its own family, which `would_sniff` answers.
 pub fn is_sniffable_type(supplied: Str) -> Bool []
-    todo("mime-nv.mimesniff.is_sniffable_type")
+    match supplied_type(supplied)
+        None    => true
+        Some(m) => is_unknown_type(supplied, m)
 
-// Whether the bytes look like text rather than binary.
+// Whether the bytes contain a binary data byte (section 3): 0x00 to
+// 0x08, 0x0B, 0x0E to 0x1A, or 0x1C to 0x1F.
 //
-// The standard's rule, which is not a heuristic: a resource is binary
-// if it contains any of a named set of bytes — the C0 controls except
-// tab, line feed, form feed, carriage return and escape, plus the two
-// that a BOM would have explained. Published because a caller choosing
-// between a text and a binary transfer asks exactly this.
+// Tab, line feed, form feed, carriage return and escape are text.
+// Only the first `header_bytes()` bytes are read, as the standard does.
 pub fn looks_binary(head: Bytes) -> Bool []
-    todo("mime-nv.mimesniff.looks_binary")
+    let n = bytes.len(head)
+    var s = mimesniff_core.sniff_start(mimesniff_core.ctx_text_or_binary())
+    for i in 0..n
+        if i >= header_bytes()
+            break
+        s = mimesniff_core.sniff_byte(s, bytes.byte_at(head, i) ?? 0)
+        if mimesniff_core.sniff_binary(s)
+            return true
+    mimesniff_core.sniff_binary(s)
 
-// The byte-order mark's encoding, as an IANA charset name, or `""`.
+// The byte order mark's encoding, as an IANA charset name, or `""`.
 //
-// Checked before everything else by the standard, and useful on its own
-// to a caller decoding text: a UTF-16 file read as UTF-8 is not
-// mojibake but nulls, which is a different and more confusing failure.
+// `EF BB BF` is `utf-8`, `FE FF` is `utf-16be`, and `FF FE` is
+// `utf-16le`.  A UTF-16 file read as UTF-8 decodes as nulls rather than
+// as mojibake.
 pub fn bom_charset(head: Bytes) -> Str []
-    todo("mime-nv.mimesniff.bom_charset")
+    let b0 = bytes.byte_at(head, 0) ?? 0
+    let b1 = bytes.byte_at(head, 1) ?? 0
+    let b2 = bytes.byte_at(head, 2) ?? 0
+    if b0 == 239 and b1 == 187 and b2 == 191
+        return "utf-8"
+    if b0 == 254 and b1 == 255
+        return "utf-16be"
+    if b0 == 255 and b1 == 254
+        return "utf-16le"
+    ""
 
-// How many bytes of BOM to skip, if any.
+// How many bytes of byte order mark to skip: 3, 2 or 0.
 pub fn bom_len(head: Bytes) -> Int []
-    todo("mime-nv.mimesniff.bom_len")
-
-// ── The device half ──────────────────────────────────────────────────
-
-// A sniff in progress: the table walk as `@value` state.
-//
-// What a device has instead of a buffer. Every field is an `Int`, the
-// struct lives in the caller's stack frame, and a firmware serving a
-// file off flash feeds it the bytes it was already reading.
-//
-// It is the same walk `sniff` does rather than a second one, which is
-// what keeps the two answers from drifting apart; the suite checks that
-// on every vector.
-pub @value
-struct MimeSniff
-    // How many bytes have been fed.
-    pos: Int
-    // Which table is being walked, as the integer `MimeSniffContext`
-    // becomes — an enum is not a position a `@value` field may occupy
-    // (SPEC § 14.2), so the context arrives as a code and
-    // `context_code` is the bridge.
-    ctx_code: Int
-    // The code the walk has settled on, or `mimecode.unknown()` while
-    // it is still undecided.
-    code: Int
-    // Which patterns are still possible, as a bitmap, and how far into
-    // them the walk has matched. Two integers rather than a cursor per
-    // pattern: the table's patterns are short and mostly disagree on
-    // the first byte.
-    alive: Int
-    depth: Int
-    // Whether any byte so far was one of the binary-only bytes, which
-    // is the text-or-binary answer and is decided as the walk goes
-    // rather than in a second pass.
-    binary: Bool
-    // Whether the walk has finished — either because a pattern matched
-    // or because every pattern is dead.
-    settled: Bool
-
-// The integer a context is, for a `@value` state to hold.
-pub fn context_code(ctx: MimeSniffContext) -> Int []
-    todo("mime-nv.mimesniff.context_code")
-
-// A sniff before any byte.
-pub fn sniff_start(ctx_code: Int) -> MimeSniff []
-    todo("mime-nv.mimesniff.sniff_start")
-
-// Feed one byte.
-//
-// Once `sniff_settled` answers `true` further bytes change nothing, so
-// a caller may stop reading — which on a device is the difference
-// between reading eight bytes and reading 1445.
-pub fn sniff_byte(s: MimeSniff, byte: Int) -> MimeSniff []
-    todo("mime-nv.mimesniff.sniff_byte")
-
-// Tell the sniff the resource ended.
-//
-// Settles a walk that ran out of bytes before it ran out of patterns,
-// which is how a four-byte file gets an answer.
-pub fn sniff_end(s: MimeSniff) -> MimeSniff []
-    todo("mime-nv.mimesniff.sniff_end")
-
-// Whether the walk has decided.
-pub fn sniff_settled(s: MimeSniff) -> Bool []
-    todo("mime-nv.mimesniff.sniff_settled")
-
-// The code the walk settled on.
-//
-// `mimecode.unknown()` while it is undecided and for a resource nothing
-// matched, which are the same answer for the same reason: a server that
-// does not know says `application/octet-stream`.
-pub fn sniff_code(s: MimeSniff) -> Int []
-    todo("mime-nv.mimesniff.sniff_code")
-
-// Whether any byte so far was one the standard calls binary.
-pub fn sniff_binary(s: MimeSniff) -> Bool []
-    todo("mime-nv.mimesniff.sniff_binary")
-
-// How many bytes have been fed.
-pub fn sniff_pos(s: MimeSniff) -> Int []
-    todo("mime-nv.mimesniff.sniff_pos")
+    let cs = bom_charset(head)
+    if cs == "utf-8"
+        return 3
+    if cs == ""
+        return 0
+    2

@@ -1,132 +1,209 @@
-// mimecode.nv — the well-known media types as integers.
+// mimecode.nv — the well-known media types as integer codes.
 //
-// Every body here is a `todo()`; the signatures are the design.
+// A code is an integer that stands for one `type/subtype`.  The set is
+// the types this package can produce without being told: every answer
+// of the WHATWG MIME Sniffing Standard's pattern tables, and the types
+// a web server most often serves.  Any other type is a `MimeType`
+// parsed from a string, and `unknown()` is the code that says so.
 //
-// THIS MODULE IS THE DEVICE HALF, and the integer is the reason it
-// exists.  A firmware HTTP server answering `GET /logo.png` off a flash
-// filesystem needs one thing from this package — the six bytes
-// `image/png` — and what it cannot do is build them: a `MimeType` holds
-// spans into a string, and a device that has no heap has no string to
-// span.  So the surface a device uses answers a CODE, every comparison
-// is an integer compare, and `code_name` is the one call that produces
-// text — from a constant, so it is in flash rather than in RAM.
+// This module is the half a microcontroller can run.  A firmware HTTP
+// server answering `GET /logo.png` off a flash filesystem needs the
+// nine bytes `image/png` and has no heap to build a parsed type in.
+// Every function here takes and returns integers, except `code_name`,
+// which answers a constant string, and `code_named`, which reads one.
+// Every function carries `@tier(embedded)`, so an allocation written
+// here is refused where it stands.
 //
-// IT IS ALSO THE HOST'S FAST PATH, and that is not a coincidence.  A
-// static-file server comparing `Content-Type` strings per request is
-// comparing the same twenty strings over and over; comparing codes is
-// an integer test, and the code is what `mimeext` answers and what the
-// sniffer settles on.  The two halves are one vocabulary rather than
-// two.
+// A code keeps the spelling its source uses.  The sniffing standard
+// answers `audio/wave` and `video/avi`, and the extension table answers
+// `audio/wav` and `video/x-msvideo` for the same files.  `code_named`
+// maps only the exact essence, so `audio/wav` has no code and
+// `code_name(code_named(t))` is `t` for every `t` that has one.
 //
-// THE SET IS THE ONE THE SNIFFING STANDARD AND THE EXTENSION TABLE
-// SHARE.  A code exists for a type if something in this package can
-// produce it without being told: the WHATWG pattern table's outputs,
-// and the extensions a web server actually serves.  Everything else is
-// a `MimeType` parsed from a string, and `unknown()` is the code that
-// says so — which is a real answer rather than a failure, because
-// `application/octet-stream` is what a server sends when it does not
-// know.
+// The codes are functions rather than an enum.  A `@value` struct's
+// fields are scalars (SPEC § 14.2), and the sniffer's state holds a
+// code.  A function returning a literal compiles to the literal.
 
-// The code for a type nothing here recognises.
-//
-// Its name is `application/octet-stream`, which is the honest answer
-// rather than an error: a server that does not know what a file is says
-// so with that type, and a browser that receives it offers a download
-// instead of guessing.
-pub fn unknown() -> Int []
-    todo("mime-nv.mimecode.unknown")
+// How many codes there are, not counting `unknown()`.
+const CODES: Int = 31
 
-// The codes, one function each.
+// The code for a type nothing here recognises: 0.
 //
-// Functions rather than a `const` block or an enum, and the reason is
-// the device: an enum is not a position a `@value` sniffer's state can
-// occupy (SPEC § 14.5), and these have to be readable from inside one.
-// A function returning a literal compiles to the literal.
+// Its name is `application/octet-stream`, which is what a server sends
+// when it does not know what a file is.  A browser that receives it
+// offers a download instead of guessing.
+pub @tier(embedded)
+fn unknown() -> Int
+    0
 
 // `text/html`.
-pub fn text_html() -> Int []
-    todo("mime-nv.mimecode.text_html")
+pub @tier(embedded)
+fn text_html() -> Int
+    1
 
 // `text/plain`.
-pub fn text_plain() -> Int []
-    todo("mime-nv.mimecode.text_plain")
+pub @tier(embedded)
+fn text_plain() -> Int
+    2
 
 // `text/css`.
-pub fn text_css() -> Int []
-    todo("mime-nv.mimecode.text_css")
+pub @tier(embedded)
+fn text_css() -> Int
+    3
 
 // `text/csv`.
-pub fn text_csv() -> Int []
-    todo("mime-nv.mimecode.text_csv")
+pub @tier(embedded)
+fn text_csv() -> Int
+    4
 
-// `application/javascript`.
-pub fn application_javascript() -> Int []
-    todo("mime-nv.mimecode.application_javascript")
+// `application/javascript`, the name RFC 9239 made obsolete.
+//
+// The extension table answers `text/javascript` for `.js`, which is
+// `text_javascript()`.  This code remains for a caller that receives
+// the older name.
+pub @tier(embedded)
+fn application_javascript() -> Int
+    5
 
 // `application/json`.
-pub fn application_json() -> Int []
-    todo("mime-nv.mimecode.application_json")
+pub @tier(embedded)
+fn application_json() -> Int
+    6
 
 // `application/xml`.
-pub fn application_xml() -> Int []
-    todo("mime-nv.mimecode.application_xml")
+pub @tier(embedded)
+fn application_xml() -> Int
+    7
 
 // `application/wasm`.
-pub fn application_wasm() -> Int []
-    todo("mime-nv.mimecode.application_wasm")
+pub @tier(embedded)
+fn application_wasm() -> Int
+    8
 
 // `application/pdf`.
-pub fn application_pdf() -> Int []
-    todo("mime-nv.mimecode.application_pdf")
+pub @tier(embedded)
+fn application_pdf() -> Int
+    9
 
 // `application/zip`.
-pub fn application_zip() -> Int []
-    todo("mime-nv.mimecode.application_zip")
+pub @tier(embedded)
+fn application_zip() -> Int
+    10
 
-// `application/gzip`.
-pub fn application_gzip() -> Int []
-    todo("mime-nv.mimecode.application_gzip")
+// `application/gzip`, the type RFC 6713 registers.
+//
+// The sniffing standard spells its answer `application/x-gzip`; the
+// sniffer answers this code for it.
+pub @tier(embedded)
+fn application_gzip() -> Int
+    11
 
 // `image/png`.
-pub fn image_png() -> Int []
-    todo("mime-nv.mimecode.image_png")
+pub @tier(embedded)
+fn image_png() -> Int
+    12
 
 // `image/jpeg`.
-pub fn image_jpeg() -> Int []
-    todo("mime-nv.mimecode.image_jpeg")
+pub @tier(embedded)
+fn image_jpeg() -> Int
+    13
 
 // `image/gif`.
-pub fn image_gif() -> Int []
-    todo("mime-nv.mimecode.image_gif")
+pub @tier(embedded)
+fn image_gif() -> Int
+    14
 
 // `image/webp`.
-pub fn image_webp() -> Int []
-    todo("mime-nv.mimecode.image_webp")
+pub @tier(embedded)
+fn image_webp() -> Int
+    15
 
 // `image/svg+xml`.
-pub fn image_svg_xml() -> Int []
-    todo("mime-nv.mimecode.image_svg_xml")
+pub @tier(embedded)
+fn image_svg_xml() -> Int
+    16
 
 // `image/x-icon`.
-pub fn image_x_icon() -> Int []
-    todo("mime-nv.mimecode.image_x_icon")
+pub @tier(embedded)
+fn image_x_icon() -> Int
+    17
 
 // `font/woff2`.
-pub fn font_woff2() -> Int []
-    todo("mime-nv.mimecode.font_woff2")
+pub @tier(embedded)
+fn font_woff2() -> Int
+    18
 
 // `audio/mpeg`.
-pub fn audio_mpeg() -> Int []
-    todo("mime-nv.mimecode.audio_mpeg")
+pub @tier(embedded)
+fn audio_mpeg() -> Int
+    19
 
 // `video/mp4`.
-pub fn video_mp4() -> Int []
-    todo("mime-nv.mimecode.video_mp4")
+pub @tier(embedded)
+fn video_mp4() -> Int
+    20
+
+// `text/javascript`, the name RFC 9239 gives JavaScript.
+pub @tier(embedded)
+fn text_javascript() -> Int
+    21
+
+// `text/xml`, which the sniffing standard answers for `<?xml`.
+pub @tier(embedded)
+fn text_xml() -> Int
+    22
+
+// `image/bmp`.
+pub @tier(embedded)
+fn image_bmp() -> Int
+    23
+
+// `application/postscript`.
+pub @tier(embedded)
+fn application_postscript() -> Int
+    24
+
+// `audio/aiff`.
+pub @tier(embedded)
+fn audio_aiff() -> Int
+    25
+
+// `application/ogg`, which the sniffing standard answers for an Ogg
+// container.
+pub @tier(embedded)
+fn application_ogg() -> Int
+    26
+
+// `audio/midi`.
+pub @tier(embedded)
+fn audio_midi() -> Int
+    27
+
+// `video/avi`, the sniffing standard's name for an AVI file.
+pub @tier(embedded)
+fn video_avi() -> Int
+    28
+
+// `audio/wave`, the sniffing standard's name for a WAVE file.
+pub @tier(embedded)
+fn audio_wave() -> Int
+    29
+
+// `video/webm`.
+pub @tier(embedded)
+fn video_webm() -> Int
+    30
+
+// `application/x-rar-compressed`.
+pub @tier(embedded)
+fn application_x_rar_compressed() -> Int
+    31
 
 // The full `type/subtype` a code stands for.
 //
-// From a constant, so the bytes are in flash on a device rather than
-// built in RAM.  The one call in this module that produces text.
+// Each answer is a string constant, so on a device the bytes are in
+// flash rather than built in RAM.  A code outside the table answers
+// `application/octet-stream`, the name of `unknown()`.
 //
 // ```novo
 // use mimecode
@@ -134,55 +211,149 @@ pub fn video_mp4() -> Int []
 // fn main() [io]
 //     println(mimecode.code_name(mimecode.image_png()))
 // ```
-pub fn code_name(code: Int) -> Str []
-    todo("mime-nv.mimecode.code_name")
+pub @tier(embedded)
+fn code_name(code: Int) -> Str
+    match code
+        1  => "text/html"
+        2  => "text/plain"
+        3  => "text/css"
+        4  => "text/csv"
+        5  => "application/javascript"
+        6  => "application/json"
+        7  => "application/xml"
+        8  => "application/wasm"
+        9  => "application/pdf"
+        10 => "application/zip"
+        11 => "application/gzip"
+        12 => "image/png"
+        13 => "image/jpeg"
+        14 => "image/gif"
+        15 => "image/webp"
+        16 => "image/svg+xml"
+        17 => "image/x-icon"
+        18 => "font/woff2"
+        19 => "audio/mpeg"
+        20 => "video/mp4"
+        21 => "text/javascript"
+        22 => "text/xml"
+        23 => "image/bmp"
+        24 => "application/postscript"
+        25 => "audio/aiff"
+        26 => "application/ogg"
+        27 => "audio/midi"
+        28 => "video/avi"
+        29 => "audio/wave"
+        30 => "video/webm"
+        31 => "application/x-rar-compressed"
+        _  => "application/octet-stream"
+
+// The ASCII lowercase of a byte; every other byte is itself.
+@tier(embedded)
+fn lower(b: Int) -> Int
+    if b >= 'A' and b <= 'Z'
+        return b + 32
+    b
+
+// Whether `text` begins with the essence `name`, compared ASCII
+// case-insensitively, with nothing after it but parameters.
+//
+// Leading spaces and tabs are skipped.  After the essence the text must
+// end or continue with a space, a tab or `;`.
+@tier(embedded)
+fn names(text: Str, name: Str) -> Bool
+    let n = str.len(text)
+    var at = 0
+    for i in 0..n
+        let b = str.byte_at_or(text, i, 0)
+        if b != ' ' and b != '\t'
+            break
+        at = at + 1
+    let want = str.len(name)
+    if n - at < want
+        return false
+    for i in 0..want
+        if lower(str.byte_at_or(text, at + i, 0)) != str.byte_at_or(name, i, 0)
+            return false
+    let next = str.byte_at_or(text, at + want, ';')
+    next == ';' or next == ' ' or next == '\t'
 
 // The code a `type/subtype` names, or `unknown()`.
 //
-// Compared ASCII-case-insensitively, because RFC 2045 § 5.1 says type
-// and subtype are case-insensitive and browsers implement exactly that.
-// Parameters are ignored: `text/html; charset=utf-8` is `text/html`.
-pub fn code_named(essence: Str) -> Int []
-    todo("mime-nv.mimecode.code_named")
-
-// The `charset=utf-8` a code should be served with, or `""`.
+// Type and subtype are compared ASCII case-insensitively, which is
+// RFC 2045 section 5.1's rule.  Parameters are ignored:
+// `text/html; charset=utf-8` is `text_html()`.  Only the exact essence
+// is mapped, so an alias such as `audio/wav` answers `unknown()`.
 //
-// Published because getting this wrong is a bug with a visible symptom:
-// a `text/html` served without a charset is rendered with the browser's
-// locale default, and a page of UTF-8 read as Windows-1252 shows the
-// mojibake every non-English site has had at least once.  The types
-// that want a charset are the text ones and the two structured
-// text-based ones, and the list belongs beside the codes rather than in
-// a server's own `if`.
-pub fn code_charset(code: Int) -> Str []
-    todo("mime-nv.mimecode.code_charset")
-
-// Whether a code names a type that a browser will render inline rather
-// than download.
+// ```novo
+// use mimecode
 //
-// What a server deciding `Content-Disposition` asks, and a security
-// question rather than a convenience one: a user-uploaded file served
-// as `text/html` runs script on the serving origin, which is why an
-// upload endpoint pins its own type and sends `nosniff`.
-pub fn code_is_inline(code: Int) -> Bool []
-    todo("mime-nv.mimecode.code_is_inline")
+// fn main() [io]
+//     println("${mimecode.code_named("TEXT/HTML; charset=utf-8") == mimecode.text_html()}")
+// ```
+pub @tier(embedded)
+fn code_named(essence: Str) -> Int
+    for code in 1..CODES + 1
+        if names(essence, code_name(code))
+            return code
+    0
 
-// Whether a code is one of the text types.
+// The charset a code should be served with, `utf-8`, or `""`.
 //
-// `text/*`, plus the structured types whose bytes are text —
-// `application/json`, `application/xml`, `application/javascript`,
-// `image/svg+xml`.  The set a caller compresses, and the set a caller
-// decodes as characters rather than handling as bytes.
-pub fn code_is_text(code: Int) -> Bool []
-    todo("mime-nv.mimecode.code_is_text")
+// A `text/html` served without a charset is decoded with the browser's
+// locale default, and a UTF-8 page read as Windows-1252 shows mojibake.
+// The types that carry a charset parameter are the `text/*` types,
+// `application/javascript` and `application/xml`.  `application/json`
+// defines no charset parameter (RFC 8259 section 11), so it answers
+// `""`.
+pub @tier(embedded)
+fn code_charset(code: Int) -> Str
+    if code == 1 or code == 2 or code == 3 or code == 4 or code == 5
+        return "utf-8"
+    if code == 7 or code == 21 or code == 22
+        return "utf-8"
+    ""
 
-// How many codes there are.
+// Whether a browser displays or plays a code's type in the tab rather
+// than offering it as a download.
 //
-// For a caller iterating them — a server printing what it can serve, a
-// test asserting the table is complete.
-pub fn code_count() -> Int []
-    todo("mime-nv.mimecode.code_count")
+// The inline types are HTML, plain text, CSS, JavaScript, JSON, XML,
+// PDF, the image types, and the audio and video formats browsers play
+// natively: MP3, MP4, WebM, Ogg and WAVE.  A server deciding
+// `Content-Disposition` asks this.  A user upload served as an inline
+// type runs in the site's origin, which is why an upload endpoint pins
+// its own type and sends `X-Content-Type-Options: nosniff`.
+pub @tier(embedded)
+fn code_is_inline(code: Int) -> Bool
+    if code == 4 or code == 8 or code == 10 or code == 11 or code == 18
+        return false
+    if code == 24 or code == 25 or code == 27 or code == 28 or code == 31
+        return false
+    code >= 1 and code <= CODES
 
-// The code at an index below `code_count()`.
-pub fn code_at(index: Int) -> Int []
-    todo("mime-nv.mimecode.code_at")
+// Whether a code's bytes are text.
+//
+// The `text/*` types, plus `application/json`, `application/xml`,
+// `application/javascript` and `image/svg+xml`.  This is the set a
+// server compresses and a client decodes as characters rather than
+// handling as bytes.
+pub @tier(embedded)
+fn code_is_text(code: Int) -> Bool
+    if code >= 1 and code <= 7
+        return true
+    code == 16 or code == 21 or code == 22
+
+// How many codes there are, not counting `unknown()`.
+pub @tier(embedded)
+fn code_count() -> Int
+    CODES
+
+// The code at an index below `code_count()`, or `unknown()` for an
+// index outside that range.
+//
+// For a caller listing what it can serve, and for a test asserting the
+// table is complete.
+pub @tier(embedded)
+fn code_at(index: Int) -> Int
+    if index < 0 or index >= CODES
+        return 0
+    index + 1
