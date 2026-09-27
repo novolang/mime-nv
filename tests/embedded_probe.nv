@@ -1,52 +1,55 @@
-// embedded_probe.nv — this package's device claim, as a program that
-// either builds for a Cortex-M or does not.
+// embedded_probe.nv — `mimecode` and `mimesniff_core` on a
+// microcontroller, as a program that builds for a Cortex-M, boots there
+// and checks its answers.
 //
-// It is not a test.  `scripts/shard_audit.sh`'s `core-embedded` row
-// copies it and the modules it names into a package of its own and runs
+// It is built with
 //
-//   novo build --target=nrf52-qemu src/probe.nv
+//   novo build --target=nrf52-qemu tests/embedded_probe.nv
 //
-// which produces a real Cortex-M4 ELF or fails.
+// which produces a Cortex-M4 executable or fails.  `--target=nrf52-qemu`
+// stamps `@tier(embedded)` on every function it compiles, so a `Str`
+// concatenation, a `Bytes` call or a list literal in either module is
+// refused where it is written.  The same executable boots under
 //
-// WHAT THE CLAIM COVERS.  `mimecode`, and the `@value` half of
-// `mimesniff`.  A firmware HTTP server answering `GET /logo.png` off a
-// flash filesystem needs one thing from this package — the nine bytes
-// `image/png` — and what it cannot do is build them: a `MimeType` holds
-// spans into a string and a device with no heap has no string to span.
-// So the device path is integers: a code out of the extension, or a
-// code out of the first bytes, and `code_name` at the end producing a
-// constant that lives in flash.
+//   qemu-system-arm -machine mps2-an386 -nographic -semihosting -kernel probe.elf
 //
-// `mimetype`, `mimeext` and `mimeaccept` are NOT in the probe and are
-// not claimed.  A parsed media type is a list of parameter spans, the
-// extension table is six hundred strings, and negotiation builds a
-// ranked list — all three allocate by construction.  The claim is for
-// the half that fits, and the README says which half.
+// and prints `PASS: mime-embedded` when every check below holds.
 //
-// WHAT THE TIER ACTUALLY CHECKS AT 0.0.1 is narrower than it will be,
-// and saying so is more useful than pretending otherwise: every body
-// under `src/` is a `todo()`, so what links today is the SIGNATURES and
-// the types — integers in and out, and a `@value` struct of seven
-// fields passed and returned whole.  There is no pattern table in the
-// binary yet, so this probe does not prove the table fits; it proves
-// that nothing in the shape of the device surface needs an allocator or
-// a host.  Keeping it green with the table in is a named cost of the
-// implementation step.
+// A firmware HTTP server answering `GET /logo.png` off a flash
+// filesystem needs a `Content-Type` and has no heap to build one in.
+// The path shown here is integers: a code from the first bytes, and
+// `mimecode.code_name` at the end, a constant in flash.
+//
+// `mimetype`, `mimeext`, `mimesniff` and `mimeaccept` are not used.
+// They take `Str` and `Bytes` and build lists, and one host-only
+// function anywhere in a compilation unit is an undefined symbol at link
+// time whether or not the firmware calls it.
 
 use mimecode
-use mimesniff
+use mimesniff_core
 
-// Every answer this probe checks, folded into one number so a single
-// comparison decides the run.  A firmware image has one line of output;
-// making it depend on all of them is what stops a passing run from
-// meaning "the first call linked".
+// Feed the eight bytes of a PNG signature to a sniff.
+@tier(rt)
+fn feed_png(start: MimeSniff) -> MimeSniff
+    var s = start
+    s = mimesniff_core.sniff_byte(s, 0x89)
+    s = mimesniff_core.sniff_byte(s, 0x50)
+    s = mimesniff_core.sniff_byte(s, 0x4E)
+    s = mimesniff_core.sniff_byte(s, 0x47)
+    s = mimesniff_core.sniff_byte(s, 0x0D)
+    s = mimesniff_core.sniff_byte(s, 0x0A)
+    s = mimesniff_core.sniff_byte(s, 0x1A)
+    mimesniff_core.sniff_byte(s, 0x0A)
+
+// Every answer this probe checks, counted, so a single comparison
+// decides the run and a device that disagrees with the host says how
+// many checks it lost.
 @tier(rt)
 fn score() -> Int
     var n = 0
-    // The vocabulary as integers, which is the whole device path.
+    // The vocabulary as integers.
     let png = mimecode.image_png()
-    let unknown = mimecode.unknown()
-    if png != unknown
+    if png != mimecode.unknown()
         n = n + 1
     if mimecode.code_is_text(mimecode.text_html())
         n = n + 1
@@ -54,49 +57,54 @@ fn score() -> Int
         n = n + 1
     if mimecode.code_is_inline(png)
         n = n + 1
-    if mimecode.code_count() > 0
+    if mimecode.code_charset(mimecode.text_html()) == "utf-8"
         n = n + 1
-    // The sniffer as a value: built in this frame, fed the eight bytes
-    // of a PNG signature, and read back.  This is the shape a firmware
-    // file server has and the one that has to work with no heap.
-    let ctx = mimesniff.context_code(MimeSniffBrowsing)
-    var s = mimesniff.sniff_start(ctx)
-    if mimesniff.sniff_pos(s) == 0
+    if mimecode.code_count() == 31 and mimecode.code_at(0) == mimecode.text_html()
         n = n + 1
-    if mimesniff.sniff_settled(s) == false
+    // A name read into a code, which is what a device does with the
+    // `Content-Type` of a request it received.
+    if mimecode.code_named("IMAGE/PNG; x=1") == png
         n = n + 1
-    s = mimesniff.sniff_byte(s, 0x89)
-    s = mimesniff.sniff_byte(s, 0x50)
-    s = mimesniff.sniff_byte(s, 0x4E)
-    s = mimesniff.sniff_byte(s, 0x47)
-    s = mimesniff.sniff_byte(s, 0x0D)
-    s = mimesniff.sniff_byte(s, 0x0A)
-    s = mimesniff.sniff_byte(s, 0x1A)
-    s = mimesniff.sniff_byte(s, 0x0A)
-    if mimesniff.sniff_pos(s) == 8
+    // The sniff built in this frame, fed a PNG signature, and read back.
+    var s = mimesniff_core.sniff_start(mimesniff_core.ctx_browsing())
+    if mimesniff_core.sniff_pos(s) == 0 and mimesniff_core.sniff_settled(s) == false
         n = n + 1
-    if mimesniff.sniff_code(s) == png
+    s = feed_png(s)
+    if mimesniff_core.sniff_pos(s) == 8 and mimesniff_core.sniff_settled(s)
         n = n + 1
-    if mimesniff.sniff_binary(s)
+    if mimesniff_core.sniff_code(s) == png and mimesniff_core.sniff_binary(s)
         n = n + 1
-    // And the end of a resource that ran out of bytes before it ran out
-    // of patterns, which is how a four-byte file gets an answer.
-    let e = mimesniff.sniff_end(mimesniff.sniff_start(ctx))
-    if mimesniff.sniff_settled(e)
+    // HTML after leading whitespace, in the general table.
+    var h = mimesniff_core.sniff_start(mimesniff_core.ctx_browsing())
+    h = mimesniff_core.sniff_byte(h, ' ')
+    h = mimesniff_core.sniff_byte(h, '<')
+    h = mimesniff_core.sniff_byte(h, 'p')
+    h = mimesniff_core.sniff_byte(h, '>')
+    if mimesniff_core.sniff_code(h) == mimecode.text_html()
         n = n + 1
-    if mimesniff.sniff_code(e) == unknown
+    // The same bytes with the scriptable rows off are text.
+    var t = mimesniff_core.sniff_start(mimesniff_core.ctx_browsing_unscriptable())
+    t = mimesniff_core.sniff_byte(t, '<')
+    t = mimesniff_core.sniff_byte(t, 'p')
+    t = mimesniff_core.sniff_byte(t, '>')
+    if mimesniff_core.sniff_code(mimesniff_core.sniff_end(t)) == mimecode.text_plain()
+        n = n + 1
+    // An empty resource in the image context matches no image row.
+    let e = mimesniff_core.sniff_end(mimesniff_core.sniff_start(mimesniff_core.ctx_image()))
+    if mimesniff_core.sniff_settled(e) and mimesniff_core.sniff_code(e) == mimecode.unknown()
+        n = n + 1
+    if mimesniff_core.header_bytes() == 1445
+        n = n + 1
+    // And the name a server writes, from flash.
+    if mimecode.code_name(mimesniff_core.sniff_code(s)) == "image/png"
         n = n + 1
     n
 
 @tier(rt)
 fn main() [hw, time]
     bsp.board.init()
-    // 12 is the number of checks in `score` on the path a linked build
-    // takes.  The count is printed on a failure rather than only
-    // compared, so a device that disagrees with the host says HOW MANY
-    // it lost and a bisect has somewhere to start.
-    let n = score()
-    if n == 12
+    // 15 is the number of checks in `score`.
+    if score() == 15
         hal.uart.write("PASS: mime-embedded\n")
     else
         hal.uart.write("FAIL: mime-embedded\n")

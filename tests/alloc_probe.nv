@@ -1,0 +1,56 @@
+// tests/alloc_probe.nv — a program that reaches every function in
+// `mimecode` and `mimesniff_core`, so the emitted LLVM can be read for a
+// call to the allocator.
+//
+// This is not a test.  `tests/alloc_scan.sh` builds it with `--opt=0`
+// and reads the IR.  At the default optimisation level the probe
+// inlines into `novo_main`, and there would be no function left to
+// attribute an allocation to.
+//
+// Every public function is called, because a function the probe never
+// reaches is one the linker drops and the scan never sees.  The numbers
+// are printed rather than checked; the suites own correctness.
+
+use mimecode
+use mimesniff_core
+
+// Every code, through every question `mimecode` answers.
+fn codes() -> Int
+    var score = mimecode.unknown() + mimecode.code_count()
+    let all = [mimecode.text_html(), mimecode.text_plain(), mimecode.text_css(), mimecode.text_csv(),
+               mimecode.application_javascript(), mimecode.application_json(),
+               mimecode.application_xml(), mimecode.application_wasm(), mimecode.application_pdf(),
+               mimecode.application_zip(), mimecode.application_gzip(), mimecode.image_png(),
+               mimecode.image_jpeg(), mimecode.image_gif(), mimecode.image_webp(),
+               mimecode.image_svg_xml(), mimecode.image_x_icon(), mimecode.font_woff2(),
+               mimecode.audio_mpeg(), mimecode.video_mp4(), mimecode.text_javascript(),
+               mimecode.text_xml(), mimecode.image_bmp(), mimecode.application_postscript(),
+               mimecode.audio_aiff(), mimecode.application_ogg(), mimecode.audio_midi(),
+               mimecode.video_avi(), mimecode.audio_wave(), mimecode.video_webm(),
+               mimecode.application_x_rar_compressed()]
+    for code in all
+        score = score + code + str.len(mimecode.code_name(code)) + str.len(mimecode.code_charset(code))
+        if mimecode.code_is_text(code) and mimecode.code_is_inline(code)
+            score = score + 1
+    score + mimecode.code_at(3) + mimecode.code_named("text/css; charset=utf-8")
+
+// One resource through a walk, byte by byte.
+fn walk(ctx: Int, text: Str) -> Int
+    var s = mimesniff_core.sniff_start(ctx)
+    for i in 0..str.len(text)
+        s = mimesniff_core.sniff_byte(s, str.byte_at_or(text, i, 0))
+    s = mimesniff_core.sniff_end(s)
+    var score = mimesniff_core.sniff_code(s) + mimesniff_core.sniff_pos(s)
+    if mimesniff_core.sniff_settled(s) and mimesniff_core.sniff_binary(s)
+        score = score + 1
+    score
+
+fn main() [io]
+    var score = codes() + mimesniff_core.header_bytes()
+    score = score + walk(mimesniff_core.ctx_browsing(), "<html>")
+    score = score + walk(mimesniff_core.ctx_browsing_unscriptable(), "%PDF-1.7")
+    score = score + walk(mimesniff_core.ctx_text_or_binary(), "\u{1}")
+    score = score + walk(mimesniff_core.ctx_image(), "GIF89a")
+    score = score + walk(mimesniff_core.ctx_audio_video(), "\u{0}\u{0}\u{0}\u{c}ftypmp42")
+    score = score + walk(mimesniff_core.ctx_audio_video(), "\u{1a}\u{45}\u{df}\u{a3}\u{42}\u{82}\u{84}webm\u{0}")
+    println("${score}")
