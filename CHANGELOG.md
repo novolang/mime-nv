@@ -76,6 +76,13 @@ These break code written against 0.0.x.
 - `mimeext` answers every extension with its dot: `ext_at` and
   `exts_for_type` as well as `ext_of` and `preferred_ext`.
 
+### Toolchain
+
+- The toolchain floor is 0.13.0. The bodies are written for it and use
+  no workaround: the parameter loop skips an empty parameter with
+  `continue`. One parameter is still read by a function of its own,
+  because that keeps the loop short.
+
 ## 0.0.2 — 2026-09-15
 
 README rewritten to the package README style guide (docs/writing-a-readme.md); no change to the interface.

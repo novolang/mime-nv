@@ -25,7 +25,9 @@ category    = "web"
 tags        = ["mime", "media-type", "content-type", "sniffing", "accept", "content-negotiation", "sans-io", "embedded"]
 repository  = "https://github.com/novolang/mime-nv"
 maintainers = ["novo-lang"]
-novo        = ">= 0.12.1"
+# 0.13.0 is the first toolchain on which a loop may `continue` after an
+# early return, which `mimetype.parse_bounded` does.
+novo        = ">= 0.13.0"
 
 # A library: no `main`, so `novo pkg build` type-checks and
 # effect-checks every module under `src/` and writes no binary.
