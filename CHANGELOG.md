@@ -5,6 +5,77 @@ All notable changes to mime-nv are recorded here. The format is
 package follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 with the pre-1.0 rule that a breaking change bumps the MINOR number.
 
+## 0.1.0 — 2026-09-27
+
+The first implementation of the interface published as 0.0.1: media
+types parsed and printed, the extension table both ways, the WHATWG
+sniffing algorithm, and `Accept` negotiation.
+
+### Added
+
+- `mimetype` parses RFC 2045 section 5.1 with the optional whitespace
+  RFC 9110 allows around `;`, and skips empty parameters.
+  `value_str` answers one parameter's value, for a caller walking a
+  repeated parameter.
+- `mimeext` holds mime_guess's table of 1379 extensions, written by
+  `tools/ext_table.py` from a pinned commit.  `preferred_ext` picks the
+  extension Python's `mimetypes` prefers where it is one the table
+  lists.
+- `mimesniff_core`, a new module, is the sniffer's `@value` walk.  It
+  covers every row of the MIME Sniffing Standard's general, image,
+  audio-video, archive and text-or-binary tables, with the MP4 and WebM
+  signatures computed a byte at a time.  Every function in it and in
+  `mimecode` carries `@tier(embedded)`.
+- `mimecode` gains eleven codes, one for each answer of the sniffing
+  tables that had none, plus `text/javascript`, which the extension
+  table answers for `.js` (RFC 9239): `text_javascript`, `text_xml`,
+  `image_bmp`, `application_postscript`, `audio_aiff`,
+  `application_ogg`, `audio_midi`, `video_avi`, `audio_wave`,
+  `video_webm` and `application_x_rar_compressed`.
+- `tests/differential_tests.nv` checks the parser against Python's
+  `email` package and the table against its `mimetypes`, and is written
+  by `tools/differential.py`.
+- `tests/alloc_scan.sh` checks the emitted LLVM for an allocation in the
+  two device modules, with a negative control that must be caught.
+
+### Changed
+
+These break code written against 0.0.x.
+
+- The byte-at-a-time sniffer moved from `mimesniff` to
+  `mimesniff_core`: `MimeSniff`, `sniff_start`, `sniff_byte`,
+  `sniff_end`, `sniff_settled`, `sniff_code`, `sniff_binary` and
+  `sniff_pos`.  `mimesniff` takes `Bytes` and `Str`, which the embedded
+  runtime does not define, and one host-only function in a compilation
+  unit fails a device build at link time.  The context codes are
+  `mimesniff_core.ctx_browsing()` and its siblings;
+  `mimesniff.context_code` still converts a `MimeSniffContext`.
+- `MimeSniff`'s fields describe the walk and changed with it.
+- `sniff_with` follows the standard's section 7 where the interface's
+  comments did not.  A supplied `text/plain` is never sniffed to HTML:
+  in the four spellings an old Apache server writes it becomes
+  `application/octet-stream` for binary bytes and stays `text/plain`
+  otherwise, and in any other spelling it is kept.
+  `application/octet-stream` is kept.  With `nosniff`, a missing or
+  unknown type is still sniffed without the HTML, XML and PDF rows.
+- `is_sniffable_type` answers whether a supplied type counts as none:
+  empty, not a media type, `unknown/unknown`, `application/unknown` or
+  `*/*`.  It answered `true` for `text/plain` and
+  `application/octet-stream` in the interface's tests.
+- An empty resource sniffs as `text/plain`, the standard's answer, and
+  a WebAssembly module as `application/octet-stream`, because the
+  standard has no row for it.
+- `mimeaccept` follows RFC 9110 section 12.5.1: the most specific
+  matching range sets an offer's quality, and the highest quality wins.
+  The interface compared specificity between offers, so
+  `text/*;q=0.9, */*;q=1` now ranks JSON above HTML.  `specificity`
+  adds one for each parameter a range names, and a range's parameters
+  must be on an offer for it to match.
+- `MimeRange.extensions` holds every parameter other than `q`, wherever
+  it stands, as RFC 9110 has a recipient read `q` in any position.
+- `mimeext` answers every extension with its dot: `ext_at` and
+  `exts_for_type` as well as `ext_of` and `preferred_ext`.
+
 ## 0.0.2 — 2026-09-15
 
 README rewritten to the package README style guide (docs/writing-a-readme.md); no change to the interface.

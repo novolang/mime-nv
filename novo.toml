@@ -1,25 +1,23 @@
 [package]
 name        = "mime-nv"
-version     = "0.0.2"
-description = "Media types as values: `type/subtype; param=value` parsed into spans over the caller's own string with RFC 2045's token and quoted-string rules, the extension table looked up both ways, the WHATWG MIME Sniffing pattern table as a pure function with `nosniff` as a flag, and `Accept` negotiation with q-values answering the best of a caller's own list.  Interface only — every body is a todo()."
+version     = "0.1.0"
+description = "Media types as values: `type/subtype; param=value` parsed into spans over the caller's own string with RFC 2045's token and quoted-string rules, mime_guess's extension table looked up both ways, the WHATWG MIME Sniffing Standard over the bytes, the supplied type and the no-sniff flag, and RFC 9110 `Accept` negotiation answering the best of a caller's own offers.  The codes and the byte-at-a-time sniffer build for a microcontroller."
 license     = "Apache-2.0"
 
-# An INTERFACE release: every `pub fn` body is a `todo()`, so the
-# signatures and the effect rows are published and nothing is
-# implemented.  `novo pkg publish` recognises the shape and requires
-# both the draft stability and the 0.0.x version; the first
-# implementation is the 0.1.0 published over it.
-stability   = "draft"
+# `experimental` because no program outside this repository has used the
+# package yet, and the tests were written against the signatures rather
+# than by a consumer.
+stability   = "experimental"
 
-# `core`.  A media type is a string the caller already holds, the
+# `core`: a media type is a string the caller already holds, the
 # extension table is data, and sniffing is a comparison against a
-# pattern table.  Nothing is read: this package is handed the first
-# bytes of a file, it never opens one.
+# pattern table.  Nothing is read.  The package is handed the first
+# bytes of a file and never opens one.
 #
-# It carries `tests/embedded_probe.nv`, so the device claim is BUILT.
-# The claim covers `mimecode` and the sniffer's `@value` half — a
-# firmware serving files off a flash filesystem needs a `Content-Type`
-# and has no heap to build one in, and both answers are integers.
+# It carries `tests/embedded_probe.nv`, which builds `mimecode` and
+# `mimesniff_core` for a Cortex-M4 and checks fifteen answers on it
+# under QEMU.  `tests/alloc_scan.sh` reads the emitted LLVM and checks
+# that no function in those two modules calls the allocator.
 layer       = "core"
 
 category    = "web"
@@ -27,29 +25,17 @@ category    = "web"
 tags        = ["mime", "media-type", "content-type", "sniffing", "accept", "content-negotiation", "sans-io", "embedded"]
 repository  = "https://github.com/novolang/mime-nv"
 maintainers = ["novo-lang"]
-novo        = ">= 0.8.9"
+novo        = ">= 0.12.1"
 
 # A library: no `main`, so `novo pkg build` type-checks and
 # effect-checks every module under `src/` and writes no binary.
 
 [docs.pages]
-"README.md" = "What a file is, from its name and from its first bytes — and why the two disagree"
+"README.md" = "What a file is, from its name and from its first bytes"
 
 [dependencies]
-# NONE, AND TWO ABSENCES ARE WORTH NAMING.
-#
-# http-codec-nv is not here.  A `Content-Type` is a header VALUE, and a
-# header value is a string; which header it came out of is the
-# business of whatever parsed the message.  Keeping this package
-# ignorant of that is what lets the standard library's `HttpHeader`,
-# http-codec-nv's `H1Headers` and a device's own eight-line parser all
-# hand it the same string.
-#
-# unicode-nv is not here either, and the absence is a finding rather
-# than an oversight.  RFC 2045 defines a media type's grammar over
-# ASCII and browsers compare type and subtype ASCII-case-insensitively,
-# deliberately — so `TEXT/HTML` and `text/html` are one type with no
-# Unicode table anywhere.  The one place a caller might expect Unicode
-# is the `charset` parameter, and a charset NAME is an ASCII label
-# registered with IANA; what the label means is a decoder's business
-# and not this package's.
+# None.  http-codec-nv is not here: a `Content-Type` is a header value,
+# which is a string, and which header it came out of belongs to whatever
+# parsed the message.  unicode-nv is not here either: RFC 2045 defines a
+# media type over ASCII, type and subtype compare ASCII
+# case-insensitively, and a charset name is an ASCII label.
