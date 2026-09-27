@@ -1,0 +1,117 @@
+// mimeext_tests.nv — the extension table, both ways.
+//
+// The table is mime_guess's, so an answer here is that crate's answer.
+// The last test walks every entry, which is what checks that the
+// binary search finds each one and that the reverse lookup lists it.
+
+use std.test
+use std.list
+use mimecode
+use mimeext
+
+@test
+fn test_an_extension_answers_what_the_name_claims() [io]
+    test.case("an extension answers a code, with or without its dot and in any case")
+    test.assert(mimeext.code_for_ext(".png") == mimecode.image_png())
+    test.assert(mimeext.code_for_ext("png") == mimecode.image_png())
+    test.assert(mimeext.code_for_ext(".PNG") == mimecode.image_png())
+
+    test.case("the full table answers strings for the rest")
+    test.assert(mimeext.type_for_ext(".png") == "image/png")
+    test.assert(mimeext.type_for_ext("odt") == "application/vnd.oasis.opendocument.text")
+    test.assert(mimeext.code_for_ext("odt") == mimecode.unknown())
+
+    test.case("the first and last entries of the table are found")
+    test.assert(mimeext.type_for_ext("123") == "application/vnd.lotus-1-2-3")
+    test.assert(mimeext.type_for_ext("zmm") == "application/vnd.handheld-entertainment+xml")
+
+    test.case("an extension with several types answers the first")
+    test.assert(mimeext.type_for_ext("gz") == "application/gzip")
+
+    test.case(".js is text/javascript, the name RFC 9239 gives it")
+    test.assert(mimeext.code_for_ext("js") == mimecode.text_javascript())
+
+    test.case("an extension the table does not know is empty, not octet-stream")
+    test.assert(mimeext.type_for_ext(".nosuch") == "")
+    test.assert(mimeext.type_for_ext("") == "")
+    test.assert(mimeext.type_for_ext(".") == "")
+    test.assert(mimeext.type_for_ext("zzzz") == "")
+    test.assert(mimeext.type_for_ext("0") == "")
+    test.assert(mimeext.type_for_ext("pn") == "")
+    test.assert(mimeext.type_for_ext("pngx") == "")
+    test.assert(mimeext.knows_ext(".nosuch") == false)
+    test.assert(mimeext.knows_ext("PNG"))
+    test.assert(mimeext.code_for_ext(".nosuch") == mimecode.unknown())
+
+@test
+fn test_a_file_name_answers_from_its_last_extension() [io]
+    test.case("the last extension is the outermost encoding")
+    test.assert(mimeext.code_for_name("archive.tar.gz") == mimecode.application_gzip())
+    test.assert(mimeext.type_for_name("page.html") == "text/html")
+    test.assert(mimeext.type_for_name("dir.d/Photo.JPG") == "image/jpeg")
+
+    test.case("a name with no extension has no type")
+    test.assert(mimeext.type_for_name("README") == "")
+    test.assert(mimeext.code_for_name("README") == mimecode.unknown())
+
+    test.case("a dotfile has no extension, which is the rule a server has to match")
+    test.assert(mimeext.ext_of(".gitignore") == "")
+    test.assert(mimeext.ext_of("README") == "")
+    test.assert(mimeext.ext_of("archive.tar.gz") == ".gz")
+    test.assert(mimeext.ext_of("Photo.JPG") == ".jpg")
+    test.assert(mimeext.ext_of("name.") == "")
+    test.assert(mimeext.ext_of("") == "")
+
+    test.case("only the last path segment counts")
+    test.assert(mimeext.ext_of("a.d/README") == "")
+    test.assert(mimeext.ext_of("C:\\files.d\\report.PDF") == ".pdf")
+    test.assert(mimeext.ext_of("site/.htaccess") == "")
+
+@test
+fn test_one_type_has_several_extensions() [io]
+    test.case("so the reverse direction is a list, in the table's order")
+    let jpegs = mimeext.exts_for_type("image/jpeg")
+    test.assert(jpegs == [".jfif", ".jpe", ".jpeg", ".jpg"])
+
+    test.case("an extension counts for every type the table lists for it")
+    test.assert(list.contains(mimeext.exts_for_type("application/x-gzip"), ".gz"))
+
+    test.case("the reverse lookup compares by essence, so a charset does not hide the type")
+    test.assert(mimeext.exts_for_type("TEXT/HTML; charset=utf-8") == [".htm", ".html", ".hxt", ".shtml"])
+
+    test.case("a type is case-insensitive, including one the table writes with capitals")
+    test.assert(list.len(mimeext.exts_for_type("application/vnd.ms-excel.addin.macroenabled.12")) > 0)
+
+    test.case("a type the table does not know has none, and neither does text that is not a type")
+    test.assert(list.len(mimeext.exts_for_type("application/nosuch")) == 0)
+    test.assert(list.len(mimeext.exts_for_type("not a type")) == 0)
+
+    test.case("the pick a caller naming a file needs is a separate function")
+    test.assert(mimeext.preferred_ext("image/jpeg") == ".jpg")
+    test.assert(mimeext.preferred_ext("text/html; charset=utf-8") == ".html")
+    test.assert(mimeext.preferred_ext("text/plain") == ".txt")
+    test.assert(mimeext.preferred_ext("image/png") == ".png")
+    test.assert(mimeext.preferred_ext("application/nosuch") == "")
+
+@test
+fn test_every_entry_of_the_table() [io]
+    test.case("the table is enumerable and sorted")
+    let n = mimeext.ext_count()
+    test.assert(n == 1379)
+    test.assert(mimeext.ext_at(0) == ".123")
+    test.assert(mimeext.ext_at(n - 1) == ".zmm")
+    test.assert(mimeext.ext_at(0 - 1) == "")
+    test.assert(mimeext.ext_at(n) == "")
+
+    test.case("every entry is found by its own extension, and listed under its own type")
+    var found = 0
+    var listed = 0
+    for i in 0..n
+        let ext = mimeext.ext_at(i)
+        if mimeext.knows_ext(ext)
+            found = found + 1
+        let t = mimeext.type_for_ext(ext)
+        if list.contains(mimeext.exts_for_type(t), ext)
+            listed = listed + 1
+    test.assert(found == n)
+    test.assert(listed == n)

@@ -1,20 +1,21 @@
-// mimetype_tests.nv — the grammar, the essence, and the extension
-// table.
+// mimetype_tests.nv — the media type grammar, the essence, the
+// parameters, and the printer.
 //
-// RED ON PURPOSE: every body under `src/` is a `todo()`, so every
-// assertion here reaches `not implemented: mime-nv.<module>.<fn>`.
-//
-// THE CASES ARE THE ONES `header == "text/html"` GETS WRONG.  A media
-// type has three spellings of one meaning — case, parameters, and
-// spacing — and a caller comparing the header string handles none of
-// them.  The suite is built around that comparison rather than around
-// the parser, because the parser is the easy half.
+// A media type has three spellings of one meaning, differing in case,
+// in parameters and in spacing, and a caller comparing the header
+// string handles none of them.  The suite is built around that
+// comparison, and around the refusals of RFC 2045 section 5.1's grammar.
 
 use std.test
 use std.list
-use mimecode
 use mimetype
-use mimeext
+
+// The error a parse answers, or a stand-in that no case expects when it
+// succeeded.
+fn refusal(input: Str) -> MimeError
+    match mimetype.parse(input)
+        Ok(_)  => MimeTooLong(0 - 1)
+        Err(e) => e
 
 @test
 fn test_a_media_type_is_spans_over_the_callers_own_string() [io]
@@ -27,6 +28,8 @@ fn test_a_media_type_is_spans_over_the_callers_own_string() [io]
             test.assert(m.type_span.len == 4)
             test.assert(mimetype.span_str(input, m.subtype_span) == "html")
             test.assert(list.len(m.params) == 1)
+            test.assert(mimetype.span_str(input, m.params[0].name) == "charset")
+            test.assert(mimetype.span_str(input, m.params[0].value) == "utf-8")
         Err(_) => test.assert(false)
 
     test.case("a type with no parameters has none, rather than one empty one")
@@ -36,13 +39,35 @@ fn test_a_media_type_is_spans_over_the_callers_own_string() [io]
 
     test.case("the structured syntax suffix is its own span")
     match mimetype.parse("application/vnd.acme.thing+json")
-        Ok(m)  => test.assert(mimetype.suffix_of("application/vnd.acme.thing+json", m)
-                              == "json")
+        Ok(m)  => test.assert(mimetype.suffix_of("application/vnd.acme.thing+json", m) == "json")
+        Err(_) => test.assert(false)
+
+    test.case("the suffix follows the last `+`")
+    match mimetype.parse("application/a+b+xml")
+        Ok(m)  => test.assert(mimetype.suffix_of("application/a+b+xml", m) == "xml")
         Err(_) => test.assert(false)
 
     test.case("and a type with no `+` has an empty one")
     match mimetype.parse("text/html")
-        Ok(m)  => test.assert(mimetype.suffix_of("text/html", m) == "")
+        Ok(m)  =>
+            test.assert(mimetype.suffix_of("text/html", m) == "")
+            test.assert(m.suffix_span.start == 9)
+        Err(_) => test.assert(false)
+
+    test.case("leading and trailing whitespace is not part of the type")
+    let padded = "  text/plain \t"
+    match mimetype.parse(padded)
+        Ok(m)  =>
+            test.assert(m.type_span.start == 2)
+            test.assert(mimetype.essence(padded, m) == "text/plain")
+        Err(_) => test.assert(false)
+
+    test.case("empty parameters are skipped, as RFC 9110 section 8.3.1 allows")
+    let sparse = "text/plain;; charset=utf-8;"
+    match mimetype.parse(sparse)
+        Ok(m)  =>
+            test.assert(list.len(m.params) == 1)
+            test.assert(mimetype.charset(sparse, m) == "utf-8")
         Err(_) => test.assert(false)
 
 @test
@@ -74,8 +99,27 @@ fn test_the_essence_is_the_comparison_and_string_equality_is_the_bug() [io]
             test.assert(mimetype.essence_eq(plain, m, "text/plain") == false)
         Err(_) => test.assert(false)
 
+    test.case("a probe of the right length with no slash, or with parameters, is not the essence")
+    match mimetype.parse(plain)
+        Ok(m)  =>
+            test.assert(mimetype.essence_eq(plain, m, "text.html") == false)
+            test.assert(mimetype.essence_eq(plain, m, "text/html; a=b") == false)
+            test.assert(mimetype.essence_eq(plain, m, "texx/html") == false)
+        Err(_) => test.assert(false)
+
 @test
-fn test_the_two_named_parameters_are_named_for_two_different_reasons() [io]
+fn test_the_type_and_the_subtype_are_readable_on_their_own() [io]
+    let input = "IMAGE/SVG+XML"
+    test.case("both come back lowercased, the subtype with its suffix")
+    match mimetype.parse(input)
+        Ok(m)  =>
+            test.assert(mimetype.type_of(input, m) == "image")
+            test.assert(mimetype.subtype_of(input, m) == "svg+xml")
+            test.assert(mimetype.suffix_of(input, m) == "xml")
+        Err(_) => test.assert(false)
+
+@test
+fn test_the_two_named_parameters() [io]
     let ct = "text/html; charset=UTF-8"
 
     test.case("charset is lowercased, because charset names are case-insensitive")
@@ -83,76 +127,168 @@ fn test_the_two_named_parameters_are_named_for_two_different_reasons() [io]
         Ok(m)  => test.assert(mimetype.charset(ct, m) == "utf-8")
         Err(_) => test.assert(false)
 
-    test.case("and is empty when the header did not say, which is a real answer")
+    test.case("and is empty when the header did not say")
     match mimetype.parse("text/html")
-        Ok(m)  => test.assert(mimetype.charset("text/html", m) == "")
+        Ok(m)  =>
+            test.assert(mimetype.charset("text/html", m) == "")
+            test.assert(mimetype.boundary("text/html", m) == "")
         Err(_) => test.assert(false)
 
-    test.case("a boundary is the case that makes quoted strings ordinary")
+    test.case("a boundary usually needs quoting, and comes back without the quotes")
     let mp = "multipart/form-data; boundary=\"---=_Part_0_1\""
     match mimetype.parse(mp)
         Ok(m)  => test.assert(mimetype.boundary(mp, m) == "---=_Part_0_1")
         Err(_) => test.assert(false)
 
-    test.case("a parameter name is matched case-insensitively, per RFC 2045 § 5.1")
+    test.case("a parameter name is matched case-insensitively, per RFC 2045 section 5.1")
     match mimetype.parse("text/html; CHARSET=utf-8")
-        Ok(m)  => test.assert(mimetype.param_str("text/html; CHARSET=utf-8", m,
-                                                 "charset") == Some("utf-8"))
+        Ok(m)  => test.assert(mimetype.param_str("text/html; CHARSET=utf-8", m, "charset") == Some("utf-8"))
         Err(_) => test.assert(false)
 
-    test.case("a repeated parameter answers the first, which is what every implementation does")
+    test.case("a repeated parameter is kept, and the first answers")
     let dup = "text/html; charset=utf-8; charset=latin1"
     match mimetype.parse(dup)
         Ok(m)  =>
             test.assert(list.len(m.params) == 2)
             test.assert(mimetype.param_str(dup, m, "charset") == Some("utf-8"))
+            test.assert(mimetype.value_str(dup, m.params[1]) == "latin1")
         Err(_) => test.assert(false)
 
-    test.case("and a parameter nobody set is absent")
-    match mimetype.parse("text/html")
-        Ok(m)  => test.assert(mimetype.param("text/html", m, "charset") == None)
+    test.case("a parameter nobody set is absent, and a longer name is not a prefix match")
+    match mimetype.parse("text/html; charsetx=1")
+        Ok(m)  =>
+            test.assert(mimetype.param("text/html; charsetx=1", m, "charset") == None)
+            test.assert(mimetype.param_str("text/html; charsetx=1", m, "charset") == None)
+        Err(_) => test.assert(false)
+
+    test.case("the raw span keeps the quotes, and the string resolves the escapes")
+    let esc = "text/plain; title=\"a \\\"quoted\\\" word\""
+    match mimetype.parse(esc)
+        Ok(m)  =>
+            match mimetype.param(esc, m, "title")
+                Some(sp) => test.assert(mimetype.span_str(esc, sp) == "\"a \\\"quoted\\\" word\"")
+                None     => test.assert(false)
+            test.assert(mimetype.param_str(esc, m, "title") == Some("a \"quoted\" word"))
+        Err(_) => test.assert(false)
+
+    test.case("an empty quoted string is a value, and it is empty")
+    match mimetype.parse("text/plain; x=\"\"")
+        Ok(m)  => test.assert(mimetype.param_str("text/plain; x=\"\"", m, "x") == Some(""))
         Err(_) => test.assert(false)
 
 @test
-fn test_every_refusal_is_a_header_that_would_be_read_as_something_else() [io]
+fn test_every_refusal_names_the_byte() [io]
     test.case("no subtype at all")
-    match mimetype.parse("text")
-        Ok(_)  => test.assert(false)
-        Err(e) =>
-            match e
-                MimeNoSubtype(_) => test.assert(true)
-                _                => test.assert(false)
+    match refusal("text")
+        MimeNoSubtype(at) => test.assert(at == 4)
+        _                 => test.assert(false)
+
+    test.case("an empty input, a missing type, and a missing subtype")
+    match refusal("")
+        MimeNoSubtype(at) => test.assert(at == 0)
+        _                 => test.assert(false)
+    match refusal("/html")
+        MimeNoSubtype(at) => test.assert(at == 0)
+        _                 => test.assert(false)
+    match refusal("text/")
+        MimeNoSubtype(at) => test.assert(at == 5)
+        _                 => test.assert(false)
+    match refusal("text/;a=b")
+        MimeNoSubtype(at) => test.assert(at == 5)
+        _                 => test.assert(false)
+
+    test.case("a separator where a token was expected")
+    match refusal("te(xt/html")
+        MimeBadToken(at, b) =>
+            test.assert(at == 2)
+            test.assert(b == 40)
+        _                   => test.assert(false)
+    match refusal("text/@html")
+        MimeBadToken(at, b) =>
+            test.assert(at == 5)
+            test.assert(b == 64)
+        _                   => test.assert(false)
 
     test.case("a space inside a token would truncate the type at the receiver")
-    match mimetype.parse("text/ht ml")
-        Ok(_)  => test.assert(false)
-        Err(e) =>
-            match e
-                MimeBadToken(_, b) => test.assert(b == 32)
-                _                  => test.assert(false)
+    match refusal("text/ht ml")
+        MimeBadToken(at, b) =>
+            test.assert(at == 7)
+            test.assert(b == 32)
+        _                   => test.assert(false)
 
-    test.case("an unterminated quote swallows the rest of the header")
-    match mimetype.parse("multipart/form-data; boundary=\"abc")
-        Ok(_)  => test.assert(false)
-        Err(e) =>
-            match e
-                MimeUnterminatedQuote(_) => test.assert(true)
-                _                        => test.assert(false)
+    test.case("a comma after the subtype is not a parameter")
+    match refusal("text/html,text/plain")
+        MimeBadToken(at, b) =>
+            test.assert(at == 9)
+            test.assert(b == 44)
+        _                   => test.assert(false)
+
+    test.case("an unterminated quote names the quote that opened it")
+    match refusal("multipart/form-data; boundary=\"abc")
+        MimeUnterminatedQuote(at) => test.assert(at == 30)
+        _                         => test.assert(false)
+
+    test.case("an escape inside a quoted string that is never closed")
+    match refusal("text/html; x=\"a\\\"b")
+        MimeUnterminatedQuote(at) => test.assert(at == 13)
+        _                         => test.assert(false)
 
     test.case("a backslash escaping nothing")
-    match mimetype.parse("text/html; x=\"a\\")
-        Ok(_)  => test.assert(false)
-        Err(_) => test.assert(true)
+    match refusal("text/html; x=\"a\\")
+        MimeDanglingEscape(at) => test.assert(at == 15)
+        _                      => test.assert(false)
 
-    test.case("a parameter with no value")
-    match mimetype.parse("text/html; charset")
-        Ok(_)  => test.assert(false)
-        Err(e) =>
-            match e
-                MimeBadParam(_) => test.assert(true)
-                _               => test.assert(false)
+    test.case("a control byte inside a quoted string, escaped or not")
+    match refusal("text/html; x=\"a\u{1}\"")
+        MimeBadToken(at, b) =>
+            test.assert(at == 15)
+            test.assert(b == 1)
+        _                   => test.assert(false)
+    match refusal("text/html; x=\"a\\\u{1}\"")
+        MimeBadToken(at, b) =>
+            test.assert(at == 16)
+            test.assert(b == 1)
+        _                   => test.assert(false)
 
-    test.case("and a header past the caller's bound, which is cheaper than a timeout")
+    test.case("a parameter with no value, no `=`, or no name")
+    match refusal("text/html; charset")
+        MimeBadParam(at) => test.assert(at == 18)
+        _                => test.assert(false)
+    match refusal("text/html; charset=")
+        MimeBadParam(at) => test.assert(at == 19)
+        _                => test.assert(false)
+    match refusal("text/html; =utf-8")
+        MimeBadParam(at) => test.assert(at == 11)
+        _                => test.assert(false)
+    match refusal("text/html; charset =utf-8")
+        MimeBadParam(at) => test.assert(at == 18)
+        _                => test.assert(false)
+
+    test.case("a separator inside a parameter name or a bare value")
+    match refusal("text/html; ch@rset=utf-8")
+        MimeBadToken(at, b) =>
+            test.assert(at == 13)
+            test.assert(b == 64)
+        _                   => test.assert(false)
+    match refusal("text/html; charset=@")
+        MimeBadToken(at, _) => test.assert(at == 19)
+        _                   => test.assert(false)
+
+    test.case("text after a value that is not the next parameter")
+    match refusal("text/html; a=b c")
+        MimeBadToken(at, b) =>
+            test.assert(at == 14)
+            test.assert(b == 32)
+        _                   => test.assert(false)
+    match refusal("text/html; a=\"b\"c")
+        MimeBadToken(at, b) =>
+            test.assert(at == 16)
+            test.assert(b == 99)
+        _                   => test.assert(false)
+
+@test
+fn test_a_caller_bounds_what_it_will_parse() [io]
+    test.case("more parameters than the bound")
     match mimetype.parse_bounded("text/html; a=1; b=2; c=3", 2, 4096)
         Ok(_)  => test.assert(false)
         Err(e) =>
@@ -160,145 +296,146 @@ fn test_every_refusal_is_a_header_that_would_be_read_as_something_else() [io]
                 MimeTooLong(n) => test.assert(n == 2)
                 _              => test.assert(false)
 
+    test.case("a longer input than the bound")
+    match mimetype.parse_bounded("text/html; a=1", 8, 10)
+        Ok(_)  => test.assert(false)
+        Err(e) =>
+            match e
+                MimeTooLong(n) => test.assert(n == 10)
+                _              => test.assert(false)
+
+    test.case("and exactly at the bounds is accepted")
+    match mimetype.parse_bounded("text/html; a=1; b=2", 2, 19)
+        Ok(m)  => test.assert(list.len(m.params) == 2)
+        Err(_) => test.assert(false)
+
+@test
+fn test_every_refusal_reads_as_one_line() [io]
+    test.case("each variant has a message naming where")
+    test.assert(str.contains(MimeNoSubtype(4).message(), "at 4"))
+    test.assert(str.contains(MimeBadToken(7, 32).message(), "byte 32"))
+    test.assert(str.contains(MimeUnterminatedQuote(3).message(), "not closed"))
+    test.assert(str.contains(MimeDanglingEscape(5).message(), "backslash"))
+    test.assert(str.contains(MimeBadParam(9).message(), "name=value"))
+    test.assert(str.contains(MimeBadQuality("banana").message(), "banana"))
+    test.assert(str.contains(MimeTooLong(2).message(), "limit of 2"))
+
 @test
 fn test_printing_normalises_rather_than_round_tripping() [io]
-    // Two equal types print equal, which is the property a caller
-    // re-emitting a header wants.
+    // Two equal types print equal, which is what a caller re-emitting a
+    // header wants.
     let odd = "TEXT/HTML ;  CHARSET=\"utf-8\""
     test.case("case folds, spacing settles, and a needlessly quoted token loses its quotes")
     match mimetype.parse(odd)
         Ok(m)  => test.assert(mimetype.print(odd, m) == "text/html; charset=utf-8")
         Err(_) => test.assert(false)
 
-    test.case("building from parts checks the byte rules")
-    match mimetype.build("text", "html", [("charset", "utf-8")])
+    test.case("a value that needs its quotes keeps them, with its escapes")
+    let mp = "multipart/mixed; boundary=\"a \\\"b\\\\\""
+    match mimetype.parse(mp)
+        Ok(m)  => test.assert(mimetype.print(mp, m) == "multipart/mixed; boundary=\"a \\\"b\\\\\"")
+        Err(_) => test.assert(false)
+
+    test.case("building from parts checks the byte rules and lowercases the names")
+    match mimetype.build("Text", "HTML", [("Charset", "utf-8")])
         Ok(s)  => test.assert(s == "text/html; charset=utf-8")
+        Err(_) => test.assert(false)
+    match mimetype.build("multipart", "form-data", [("boundary", "a b")])
+        Ok(s)  => test.assert(s == "multipart/form-data; boundary=\"a b\"")
         Err(_) => test.assert(false)
 
     test.case("and refuses a subtype a receiver would truncate")
     match mimetype.build("text", "ht ml", [])
         Ok(_)  => test.assert(false)
-        Err(_) => test.assert(true)
+        Err(e) =>
+            match e
+                MimeBadToken(at, b) =>
+                    test.assert(at == 2)
+                    test.assert(b == 32)
+                _                   => test.assert(false)
 
+    test.case("an empty type, subtype or name, and a value no quoted string can carry")
+    match mimetype.build("", "html", [])
+        Ok(_)  => test.assert(false)
+        Err(e) =>
+            match e
+                MimeNoSubtype(_) => test.assert(true)
+                _                => test.assert(false)
+    match mimetype.build("text", "", [])
+        Ok(_)  => test.assert(false)
+        Err(_) => test.assert(true)
+    match mimetype.build("text", "html", [("", "x")])
+        Ok(_)  => test.assert(false)
+        Err(e) =>
+            match e
+                MimeBadParam(_) => test.assert(true)
+                _               => test.assert(false)
+    match mimetype.build("text", "html", [("x", "a\nb")])
+        Ok(_)  => test.assert(false)
+        Err(e) =>
+            match e
+                MimeBadToken(at, b) =>
+                    test.assert(at == 1)
+                    test.assert(b == 10)
+                _                   => test.assert(false)
+
+@test
+fn test_quoting_and_the_token_rule() [io]
     test.case("a value that needs quoting gets it")
     test.assert(mimetype.needs_quoting("---=_Part_0_1"))
     test.assert(mimetype.needs_quoting("utf-8") == false)
+    test.assert(mimetype.needs_quoting(""))
     match mimetype.quote("a b")
         Ok(q)  => test.assert(q == "\"a b\"")
         Err(_) => test.assert(false)
+    match mimetype.quote("utf-8")
+        Ok(q)  => test.assert(q == "utf-8")
+        Err(_) => test.assert(false)
+    match mimetype.quote("say \"hi\"")
+        Ok(q)  => test.assert(q == "\"say \\\"hi\\\"\"")
+        Err(_) => test.assert(false)
 
-    test.case("and unquoting resolves the escapes")
+    test.case("a control byte cannot be quoted")
+    match mimetype.quote("a\tb\u{7f}")
+        Ok(_)  => test.assert(false)
+        Err(e) =>
+            match e
+                MimeBadToken(at, b) =>
+                    test.assert(at == 3)
+                    test.assert(b == 127)
+                _                   => test.assert(false)
+
+    test.case("unquoting resolves the escapes, and leaves a token alone")
     match mimetype.unquote("\"a\\\"b\"")
         Ok(v)  => test.assert(v == "a\"b")
         Err(_) => test.assert(false)
+    match mimetype.unquote("token")
+        Ok(v)  => test.assert(v == "token")
+        Err(_) => test.assert(false)
+
+    test.case("and refuses what a quoted string cannot be")
+    match mimetype.unquote("\"open")
+        Ok(_)  => test.assert(false)
+        Err(e) =>
+            match e
+                MimeUnterminatedQuote(at) => test.assert(at == 0)
+                _                         => test.assert(false)
+    match mimetype.unquote("\"a\"b")
+        Ok(_)  => test.assert(false)
+        Err(e) =>
+            match e
+                MimeBadToken(at, b) =>
+                    test.assert(at == 3)
+                    test.assert(b == 98)
+                _                   => test.assert(false)
 
     test.case("the token rule is the one every position shares")
-    test.assert(mimetype.token_byte_ok(0x61))
-    test.assert(mimetype.token_byte_ok(0x2F) == false)
-    test.assert(mimetype.token_byte_ok(0x3B) == false)
-    test.assert(mimetype.token_byte_ok(0x20) == false)
-
-@test
-fn test_the_extension_table_answers_what_the_name_claims() [io]
-    test.case("an extension answers a code, with or without its dot and in any case")
-    test.assert(mimeext.code_for_ext(".png") == mimecode.image_png())
-    test.assert(mimeext.code_for_ext("png") == mimecode.image_png())
-    test.assert(mimeext.code_for_ext(".PNG") == mimecode.image_png())
-
-    test.case("and a name answers one from its LAST extension")
-    test.assert(mimeext.code_for_name("archive.tar.gz") == mimecode.application_gzip())
-
-    test.case("the full table answers strings for the rest")
-    test.assert(mimeext.type_for_ext(".png") == "image/png")
-    test.assert(mimeext.type_for_name("page.html") == "text/html")
-
-    test.case("an extension the table does not know is empty, not octet-stream")
-    test.assert(mimeext.type_for_ext(".nosuch") == "")
-    test.assert(mimeext.knows_ext(".nosuch") == false)
-    test.assert(mimeext.code_for_ext(".nosuch") == mimecode.unknown())
-
-    test.case("a dotfile has no extension, which is what a server must match or it serves .htaccess")
-    test.assert(mimeext.ext_of(".gitignore") == "")
-    test.assert(mimeext.ext_of("README") == "")
-    test.assert(mimeext.ext_of("archive.tar.gz") == ".gz")
-
-    test.case("one type has several extensions, so the reverse direction is a list")
-    let jpegs = mimeext.exts_for_type("image/jpeg")
-    test.assert(list.len(jpegs) > 1)
-
-    test.case("and the pick a caller naming a file needs is a separate function")
-    test.assert(mimeext.preferred_ext("image/jpeg") == ".jpg")
-    test.assert(mimeext.preferred_ext("application/nosuch") == "")
-
-    test.case("the reverse lookup compares by essence, so a charset does not hide the type")
-    test.assert(list.len(mimeext.exts_for_type("text/html; charset=utf-8")) > 0)
-
-    test.case("the table is enumerable, for a server printing what it can serve")
-    test.assert(mimeext.ext_count() > 0)
-    test.assert(mimeext.ext_at(0) != "")
-
-@test
-fn test_a_code_is_the_vocabulary_both_halves_share() [io]
-    test.case("a code names its type from a constant")
-    test.assert(mimecode.code_name(mimecode.image_png()) == "image/png")
-    test.assert(mimecode.code_name(mimecode.unknown()) == "application/octet-stream")
-
-    test.case("and a name answers a code, ignoring case and parameters")
-    test.assert(mimecode.code_named("IMAGE/PNG") == mimecode.image_png())
-    test.assert(mimecode.code_named("text/html; charset=utf-8") == mimecode.text_html())
-    test.assert(mimecode.code_named("application/nosuch") == mimecode.unknown())
-
-    test.case("the text types are the ones a caller decodes as characters")
-    test.assert(mimecode.code_is_text(mimecode.application_json()))
-    test.assert(mimecode.code_is_text(mimecode.image_svg_xml()))
-    test.assert(mimecode.code_is_text(mimecode.application_zip()) == false)
-
-    test.case("the charset a type should be served with is beside the code, not in a server's `if`")
-    test.assert(mimecode.code_charset(mimecode.text_html()) == "utf-8")
-    test.assert(mimecode.code_charset(mimecode.image_png()) == "")
-
-    test.case("and whether a browser renders it inline is a security question a server asks")
-    test.assert(mimecode.code_is_inline(mimecode.text_html()))
-    test.assert(mimecode.code_is_inline(mimecode.application_zip()) == false)
-
-    test.case("the codes are enumerable")
-    test.assert(mimecode.code_count() > 0)
-    test.assert(mimecode.code_at(0) != mimecode.unknown())
-
-@test
-fn test_the_code_set_is_what_a_web_server_actually_serves() [io]
-    // A code exists for a type if something in this package can produce
-    // it without being told: the sniffer's outputs, and the extensions a
-    // static-file server hands out.  Every one of them is distinct, and
-    // every one names itself.
-    test.case("the text types a site is built out of")
-    test.assert(mimecode.code_name(mimecode.text_css()) == "text/css")
-    test.assert(mimecode.code_name(mimecode.text_csv()) == "text/csv")
-    test.assert(mimecode.code_name(mimecode.application_javascript())
-                == "application/javascript")
-    test.assert(mimecode.code_name(mimecode.application_xml()) == "application/xml")
-
-    test.case("the assets beside them")
-    test.assert(mimecode.code_name(mimecode.image_webp()) == "image/webp")
-    test.assert(mimecode.code_name(mimecode.image_x_icon()) == "image/x-icon")
-    test.assert(mimecode.code_name(mimecode.font_woff2()) == "font/woff2")
-
-    test.case("and the media types the sniffing table can answer")
-    test.assert(mimecode.code_name(mimecode.audio_mpeg()) == "audio/mpeg")
-    test.assert(mimecode.code_name(mimecode.video_mp4()) == "video/mp4")
-
-    test.case("a font is not text, and neither is a video")
-    test.assert(mimecode.code_is_text(mimecode.font_woff2()) == false)
-    test.assert(mimecode.code_is_text(mimecode.video_mp4()) == false)
-
-@test
-fn test_the_type_and_the_subtype_are_readable_on_their_own() [io]
-    // For a caller dispatching on the type alone — a proxy that treats
-    // every `image/*` the same way — and for one keyed on the subtype.
-    let input = "IMAGE/SVG+XML"
-    test.case("both come back lowercased")
-    match mimetype.parse(input)
-        Ok(m)  =>
-            test.assert(mimetype.type_of(input, m) == "image")
-            test.assert(mimetype.subtype_of(input, m) == "svg+xml")
-        Err(_) => test.assert(false)
+    test.assert(mimetype.token_byte_ok('a'))
+    test.assert(mimetype.token_byte_ok('{'))
+    test.assert(mimetype.token_byte_ok('/') == false)
+    test.assert(mimetype.token_byte_ok(';') == false)
+    test.assert(mimetype.token_byte_ok(' ') == false)
+    test.assert(mimetype.token_byte_ok(127) == false)
+    test.assert(mimetype.token_byte_ok(200) == false)
+    for b in ['(', ')', '<', '>', '@', ',', ';', ':', '\\', '"', '/', '[', ']', '?', '=']
+        test.assert(mimetype.token_byte_ok(b) == false)

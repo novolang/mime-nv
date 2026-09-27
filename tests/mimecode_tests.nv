@@ -1,0 +1,132 @@
+// mimecode_tests.nv — the integer codes, their names, and the table of
+// them.
+//
+// A code exists for a type if something in this package can produce it
+// without being told: the sniffing standard's answers, and the types a
+// web server most often serves.  Every code is distinct, every one names
+// itself, and `code_named` turns each name back into its code.
+
+use std.test
+use std.list
+use mimecode
+
+@test
+fn test_a_code_names_its_type_from_a_constant() [io]
+    test.case("the everyday types")
+    test.assert(mimecode.code_name(mimecode.image_png()) == "image/png")
+    test.assert(mimecode.code_name(mimecode.text_html()) == "text/html")
+    test.assert(mimecode.code_name(mimecode.text_plain()) == "text/plain")
+    test.assert(mimecode.code_name(mimecode.application_json()) == "application/json")
+
+    test.case("and a code outside the table is octet-stream, which is the name of unknown")
+    test.assert(mimecode.code_name(mimecode.unknown()) == "application/octet-stream")
+    test.assert(mimecode.code_name(999) == "application/octet-stream")
+    test.assert(mimecode.code_name(0 - 1) == "application/octet-stream")
+
+@test
+fn test_the_code_set_is_what_a_web_server_serves_and_the_sniffer_answers() [io]
+    test.case("the text types a site is built out of")
+    test.assert(mimecode.code_name(mimecode.text_css()) == "text/css")
+    test.assert(mimecode.code_name(mimecode.text_csv()) == "text/csv")
+    test.assert(mimecode.code_name(mimecode.text_javascript()) == "text/javascript")
+    test.assert(mimecode.code_name(mimecode.application_javascript()) == "application/javascript")
+    test.assert(mimecode.code_name(mimecode.application_xml()) == "application/xml")
+    test.assert(mimecode.code_name(mimecode.text_xml()) == "text/xml")
+
+    test.case("the assets beside them")
+    test.assert(mimecode.code_name(mimecode.image_jpeg()) == "image/jpeg")
+    test.assert(mimecode.code_name(mimecode.image_gif()) == "image/gif")
+    test.assert(mimecode.code_name(mimecode.image_webp()) == "image/webp")
+    test.assert(mimecode.code_name(mimecode.image_svg_xml()) == "image/svg+xml")
+    test.assert(mimecode.code_name(mimecode.image_x_icon()) == "image/x-icon")
+    test.assert(mimecode.code_name(mimecode.image_bmp()) == "image/bmp")
+    test.assert(mimecode.code_name(mimecode.font_woff2()) == "font/woff2")
+    test.assert(mimecode.code_name(mimecode.application_wasm()) == "application/wasm")
+
+    test.case("the documents and archives")
+    test.assert(mimecode.code_name(mimecode.application_pdf()) == "application/pdf")
+    test.assert(mimecode.code_name(mimecode.application_postscript()) == "application/postscript")
+    test.assert(mimecode.code_name(mimecode.application_zip()) == "application/zip")
+    test.assert(mimecode.code_name(mimecode.application_gzip()) == "application/gzip")
+    test.assert(mimecode.code_name(mimecode.application_x_rar_compressed())
+                == "application/x-rar-compressed")
+
+    test.case("and the audio and video types the sniffing tables answer, in the standard's spelling")
+    test.assert(mimecode.code_name(mimecode.audio_mpeg()) == "audio/mpeg")
+    test.assert(mimecode.code_name(mimecode.audio_aiff()) == "audio/aiff")
+    test.assert(mimecode.code_name(mimecode.audio_midi()) == "audio/midi")
+    test.assert(mimecode.code_name(mimecode.audio_wave()) == "audio/wave")
+    test.assert(mimecode.code_name(mimecode.application_ogg()) == "application/ogg")
+    test.assert(mimecode.code_name(mimecode.video_mp4()) == "video/mp4")
+    test.assert(mimecode.code_name(mimecode.video_webm()) == "video/webm")
+    test.assert(mimecode.code_name(mimecode.video_avi()) == "video/avi")
+
+@test
+fn test_a_name_answers_its_code() [io]
+    test.case("ignoring case and parameters")
+    test.assert(mimecode.code_named("IMAGE/PNG") == mimecode.image_png())
+    test.assert(mimecode.code_named("text/html; charset=utf-8") == mimecode.text_html())
+    test.assert(mimecode.code_named("text/html ;charset=utf-8") == mimecode.text_html())
+    test.assert(mimecode.code_named("  text/html\t") == mimecode.text_html())
+
+    test.case("an unknown type, a prefix, a longer subtype and an alias have no code")
+    test.assert(mimecode.code_named("application/nosuch") == mimecode.unknown())
+    test.assert(mimecode.code_named("text/htm") == mimecode.unknown())
+    test.assert(mimecode.code_named("text/html5") == mimecode.unknown())
+    test.assert(mimecode.code_named("audio/wav") == mimecode.unknown())
+    test.assert(mimecode.code_named("") == mimecode.unknown())
+
+    test.case("every code round-trips through its name")
+    for i in 0..mimecode.code_count()
+        let code = mimecode.code_at(i)
+        test.assert(mimecode.code_named(mimecode.code_name(code)) == code)
+
+@test
+fn test_the_table_is_enumerable_and_every_code_is_distinct() [io]
+    test.case("the codes are 1 to code_count, and unknown is not among them")
+    test.assert(mimecode.code_count() == 31)
+    test.assert(mimecode.code_at(0) != mimecode.unknown())
+    test.assert(mimecode.code_at(0 - 1) == mimecode.unknown())
+    test.assert(mimecode.code_at(mimecode.code_count()) == mimecode.unknown())
+
+    test.case("no two codes share a name")
+    var names: [Str] = []
+    for i in 0..mimecode.code_count()
+        let name = mimecode.code_name(mimecode.code_at(i))
+        test.assert(list.contains(names, name) == false)
+        list.push(names, name)
+
+@test
+fn test_the_properties_a_server_asks_about() [io]
+    test.case("the text types are the ones a caller decodes as characters")
+    test.assert(mimecode.code_is_text(mimecode.text_csv()))
+    test.assert(mimecode.code_is_text(mimecode.application_json()))
+    test.assert(mimecode.code_is_text(mimecode.image_svg_xml()))
+    test.assert(mimecode.code_is_text(mimecode.text_javascript()))
+    test.assert(mimecode.code_is_text(mimecode.text_xml()))
+    test.assert(mimecode.code_is_text(mimecode.application_zip()) == false)
+    test.assert(mimecode.code_is_text(mimecode.font_woff2()) == false)
+    test.assert(mimecode.code_is_text(mimecode.video_mp4()) == false)
+    test.assert(mimecode.code_is_text(mimecode.unknown()) == false)
+
+    test.case("the charset a type is served with is beside the code")
+    test.assert(mimecode.code_charset(mimecode.text_html()) == "utf-8")
+    test.assert(mimecode.code_charset(mimecode.text_css()) == "utf-8")
+    test.assert(mimecode.code_charset(mimecode.application_javascript()) == "utf-8")
+    test.assert(mimecode.code_charset(mimecode.application_xml()) == "utf-8")
+    test.assert(mimecode.code_charset(mimecode.text_javascript()) == "utf-8")
+    test.assert(mimecode.code_charset(mimecode.text_xml()) == "utf-8")
+    test.assert(mimecode.code_charset(mimecode.application_json()) == "")
+    test.assert(mimecode.code_charset(mimecode.image_png()) == "")
+
+    test.case("and whether a browser shows it in the tab")
+    test.assert(mimecode.code_is_inline(mimecode.text_html()))
+    test.assert(mimecode.code_is_inline(mimecode.image_png()))
+    test.assert(mimecode.code_is_inline(mimecode.application_pdf()))
+    test.assert(mimecode.code_is_inline(mimecode.video_webm()))
+    test.assert(mimecode.code_is_inline(mimecode.audio_wave()))
+    test.assert(mimecode.code_is_inline(mimecode.text_csv()) == false)
+    test.assert(mimecode.code_is_inline(mimecode.application_zip()) == false)
+    test.assert(mimecode.code_is_inline(mimecode.application_postscript()) == false)
+    test.assert(mimecode.code_is_inline(mimecode.video_avi()) == false)
+    test.assert(mimecode.code_is_inline(mimecode.unknown()) == false)

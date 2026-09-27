@@ -1,27 +1,22 @@
-// mimesniff_tests.nv — the pattern table, `nosniff`, and `Accept`.
+// mimesniff_tests.nv — the WHATWG MIME Sniffing Standard's tables, the
+// supplied type, `nosniff`, and the byte-at-a-time walk.
 //
-// RED ON PURPOSE: every body under `src/` is a `todo()`.
-//
-// THE SNIFF VECTORS ARE THE WHATWG STANDARD's OWN PATTERN TABLE, and
-// the two cases that matter most are not signatures at all: the
-// `nosniff` flag, which decides whether the bytes are consulted, and
-// the supplied type, which decides it too.  A suite made only of file
-// signatures would pass on an implementation that ignored both and
-// would be wrong about every upload endpoint.
-//
-// THE NEGOTIATION VECTORS ARE RFC 9110 § 12.5.1's, plus the one every
-// implementation gets wrong: specificity is checked BEFORE q, so
-// `text/*;q=0.9, */*;q=1` prefers anything textual.
+// The vectors are the standard's own rows, one resource per row, plus
+// the cases where two rows compete and the order decides.  The supplied
+// type and the no-sniff flag get tests of their own, because a suite of
+// file signatures alone would pass on an implementation that ignored
+// both.  Every vector runs through `mimesniff.sniff`, which is the
+// `mimesniff_core` walk fed from a buffer, so the host answer and the
+// device answer are one answer.
 
 use std.test
-use std.list
 use mimecode
 use mimesniff
-use mimeaccept
+use mimesniff_core
 
-// The hex helper: `bytes.from_hex` answers `?Bytes`, and a vector
-// written in this file is known good, so the empty buffer stands for a
-// typo in the literal and fails the case that used it.
+// A buffer from hexadecimal text.  A vector written here is known to be
+// good, so the empty buffer stands for a typo and fails the case that
+// used it.
 fn hex(text: Str) -> Bytes
     bytes.from_hex(text) ?? bytes.zeros(0)
 
@@ -34,71 +29,318 @@ fn gif_head() -> Bytes
 fn html_head() -> Bytes
     bytes.from_str("<!DOCTYPE html>")
 
+// An MP4 file's first box: size 24, `ftyp`, major brand `isom`, minor
+// version, and the compatible brands `isom` and `mp41`.
+fn mp4_head() -> Bytes
+    hex("00000018667479706973" + "6f6d0000020069736f6d6d703431")
+
+// The start of a WebM file: the EBML magic, a one-byte size, three
+// header elements, then the DocType element `42 82`, a one-byte size and
+// `webm`, followed by the next element.
+fn webm_head() -> Bytes
+    hex("1a45dfa39f4286810142f7810142f2810442f38108428284" + "7765626d42878104")
+
+// What `sniff` answers for a buffer in the general context.
+fn browse(head: Bytes) -> Int
+    mimesniff.sniff(head, MimeSniffBrowsing)
+
 @test
-fn test_the_pattern_table_is_the_standards_own() [io]
-    test.case("a PNG signature")
-    test.assert(mimesniff.sniff(png_head(), MimeSniffBrowsing) == mimecode.image_png())
+fn test_the_scriptable_rows() [io]
+    test.case("each HTML row, followed by a space or `>`")
+    for tag in ["<!DOCTYPE HTML", "<HTML", "<HEAD", "<SCRIPT", "<IFRAME", "<H1", "<DIV",
+                "<FONT", "<TABLE", "<A", "<STYLE", "<TITLE", "<B", "<BODY", "<BR", "<P", "<!--"]
+        test.assert(browse(bytes.from_str(tag + ">")) == mimecode.text_html())
+        test.assert(browse(bytes.from_str(tag + " x")) == mimecode.text_html())
 
-    test.case("a GIF signature")
-    test.assert(mimesniff.sniff(gif_head(), MimeSniffBrowsing) == mimecode.image_gif())
+    test.case("the letters are compared without case")
+    test.assert(browse(bytes.from_str("<!doctype html>")) == mimecode.text_html())
+    test.assert(browse(bytes.from_str("<hTmL>")) == mimecode.text_html())
+    test.assert(browse(bytes.from_str("<h1>")) == mimecode.text_html())
 
-    test.case("a JPEG's three-byte start")
-    test.assert(mimesniff.sniff(hex("ffd8ff"), MimeSniffBrowsing)
-                == mimecode.image_jpeg())
+    test.case("leading whitespace is skipped for these rows")
+    test.assert(browse(bytes.from_str(" \t\r\n\u{c}<html>")) == mimecode.text_html())
+    test.assert(browse(bytes.from_str("\n\n<?xml version=\"1.0\"?>")) == mimecode.text_xml())
 
-    test.case("a PDF, which the standard checks before the text patterns")
-    test.assert(mimesniff.sniff(bytes.from_str("%PDF-1.7"), MimeSniffBrowsing)
-                == mimecode.application_pdf())
+    test.case("without a tag-terminating byte the row does not match")
+    test.assert(browse(bytes.from_str("<HTMLX>")) == mimecode.text_plain())
+    test.assert(browse(bytes.from_str("<p\n")) == mimecode.text_plain())
+    test.assert(browse(bytes.from_str("<html")) == mimecode.text_plain())
 
-    test.case("a zip")
-    test.assert(mimesniff.sniff(hex("504b0304"), MimeSniffBrowsing)
-                == mimecode.application_zip())
+    test.case("XML is case-sensitive, and PDF skips no whitespace")
+    test.assert(browse(bytes.from_str("<?xml")) == mimecode.text_xml())
+    test.assert(browse(bytes.from_str("<?XML")) == mimecode.text_plain())
+    test.assert(browse(bytes.from_str("%PDF-1.7")) == mimecode.application_pdf())
+    test.assert(browse(bytes.from_str(" %PDF-1.7")) == mimecode.text_plain())
 
-    test.case("a gzip")
-    test.assert(mimesniff.sniff(hex("1f8b08"), MimeSniffBrowsing)
-                == mimecode.application_gzip())
+@test
+fn test_the_rows_every_context_runs() [io]
+    test.case("PostScript and the three byte order marks of the general table")
+    test.assert(browse(bytes.from_str("%!PS-Adobe-3.0")) == mimecode.application_postscript())
+    test.assert(browse(hex("feff0041")) == mimecode.text_plain())
+    test.assert(browse(hex("fffe4100")) == mimecode.text_plain())
+    test.assert(browse(hex("efbbbf41")) == mimecode.text_plain())
 
-    test.case("a wasm module")
-    test.assert(mimesniff.sniff(hex("0061736d01000000"), MimeSniffBrowsing)
-                == mimecode.application_wasm())
+    test.case("the image rows")
+    test.assert(browse(hex("0000010001001010")) == mimecode.image_x_icon())
+    test.assert(browse(hex("0000020001001010")) == mimecode.image_x_icon())
+    test.assert(browse(bytes.from_str("BM")) == mimecode.image_bmp())
+    test.assert(browse(bytes.from_str("GIF87a")) == mimecode.image_gif())
+    test.assert(browse(gif_head()) == mimecode.image_gif())
+    test.assert(browse(bytes.from_str("RIFF\u{0}\u{0}\u{0}\u{0}WEBPVP8 ")) == mimecode.image_webp())
+    test.assert(browse(png_head()) == mimecode.image_png())
+    test.assert(browse(hex("ffd8ffe0")) == mimecode.image_jpeg())
 
-    test.case("an HTML doctype, which is a pattern and not a guess")
-    test.assert(mimesniff.sniff(html_head(), MimeSniffBrowsing) == mimecode.text_html())
+    test.case("the audio and video rows")
+    test.assert(browse(hex("464f524d00001234" + "41494646")) == mimecode.audio_aiff())
+    test.assert(browse(bytes.from_str("ID3\u{3}")) == mimecode.audio_mpeg())
+    test.assert(browse(hex("4f67675300020000")) == mimecode.application_ogg())
+    test.assert(browse(hex("4d546864000000060001")) == mimecode.audio_midi())
+    test.assert(browse(bytes.from_str("RIFF\u{1}\u{2}\u{3}\u{4}AVI LIST")) == mimecode.video_avi())
+    test.assert(browse(bytes.from_str("RIFF\u{1}\u{2}\u{3}\u{4}WAVEfmt ")) == mimecode.audio_wave())
+    test.assert(browse(mp4_head()) == mimecode.video_mp4())
+    test.assert(browse(webm_head()) == mimecode.video_webm())
 
-    test.case("and bytes nothing matches are octet-stream, which is the honest answer")
-    test.assert(mimesniff.sniff(hex("00010203"), MimeSniffBrowsing)
+    test.case("the archive rows")
+    test.assert(browse(hex("1f8b0800")) == mimecode.application_gzip())
+    test.assert(browse(hex("504b030414000000")) == mimecode.application_zip())
+    test.assert(browse(hex("526172211a070001")) == mimecode.application_x_rar_compressed())
+
+@test
+fn test_what_matches_no_row() [io]
+    test.case("text is text/plain")
+    test.assert(browse(bytes.from_str("hello, world\n")) == mimecode.text_plain())
+
+    test.case("a binary data byte makes it octet-stream, which is unknown()")
+    test.assert(browse(hex("00010203")) == mimecode.unknown())
+
+    test.case("the standard has no row for WebAssembly, so a module is octet-stream")
+    test.assert(browse(hex("0061736d01000000")) == mimecode.unknown())
+
+    test.case("an empty resource has no binary byte, so it is text/plain")
+    test.assert(browse(bytes.zeros(0)) == mimecode.text_plain())
+
+    test.case("a pattern cut short by the end of the resource does not match")
+    test.assert(browse(hex("89504e47")) == mimecode.text_plain())
+    test.assert(browse(bytes.from_str("GIF8")) == mimecode.text_plain())
+    test.assert(browse(hex("feff")) == mimecode.text_plain())
+
+    test.case("the byte order marks the general table knows need four bytes")
+    test.assert(browse(hex("feff00")) == mimecode.unknown())
+
+    test.case("escape and form feed are text, and the other controls are binary")
+    test.assert(browse(bytes.from_str("a\u{1b}[1mb\u{c}")) == mimecode.text_plain())
+    for b in [0, 8, 11, 14, 26, 28, 31]
+        test.assert(browse(bytes.from_byte_list([97, b])) == mimecode.unknown())
+    for b in [9, 10, 12, 13, 27, 32, 127]
+        test.assert(browse(bytes.from_byte_list([97, b])) == mimecode.text_plain())
+
+@test
+fn test_the_order_of_the_rows_decides() [io]
+    test.case("an icon row is an image row, and images come before video")
+    // Box size 256 would make an MP4 box, but `00 00 01 00` is the
+    // icon row, and section 7.1 runs the image rows first.
+    test.assert(browse(hex("00000100667479706d703432")) == mimecode.image_x_icon())
+
+    test.case("three RIFF rows share a prefix and differ at byte eight")
+    test.assert(browse(bytes.from_str("RIFF\u{0}\u{0}\u{0}\u{0}WEBPVX")) == mimecode.unknown())
+
+@test
+fn test_the_mp4_signature() [io]
+    test.case("the major brand, or any compatible brand below the box size")
+    test.assert(browse(hex("0000001466747970" + "6d70343200000000" + "69736f6d")) == mimecode.video_mp4())
+    test.assert(browse(mp4_head()) == mimecode.video_mp4())
+
+    test.case("a box size that is not a multiple of four, or larger than the resource")
+    test.assert(browse(hex("0000001566747970" + "6d703432000000006973" + "6f6d00")) == mimecode.unknown())
+    test.assert(browse(hex("0000002066747970" + "6d70343200000000")) == mimecode.unknown())
+    test.assert(browse(hex("0001000066747970" + "6d70343200000000")) == mimecode.unknown())
+
+    test.case("a resource shorter than twelve bytes, and a box that is not ftyp")
+    test.assert(browse(hex("0000000866747970" + "6d7034")) == mimecode.unknown())
+    test.assert(browse(hex("0000001466747970" + "6d70343200000000" + "69736f6d")) == mimecode.video_mp4())
+    test.assert(browse(hex("000000146d6f6f76" + "6d70343200000000" + "69736f6d")) == mimecode.unknown())
+
+    test.case("no brand reads mp4")
+    test.assert(browse(hex("0000001866747970" + "69736f6d00000200" + "69736f6d61766331")) == mimecode.unknown())
+    test.assert(browse(hex("0000001066747970" + "6d70413200000000")) == mimecode.unknown())
+
+@test
+fn test_the_webm_signature() [io]
+    test.case("zero bytes may stand between the size and the name")
+    test.assert(browse(hex("1a45dfa3428283000077" + "65626d")) == mimecode.video_webm())
+
+    test.case("a longer size is skipped whole")
+    test.assert(browse(hex("1a45dfa342824000" + "7765626d00")) == mimecode.video_webm())
+
+    test.case("the name must be followed by one more byte when no zero comes first")
+    test.assert(browse(hex("1a45dfa342828477" + "65626d")) == mimecode.unknown())
+
+    test.case("another DocType is not WebM, and the DocType must start below byte 38")
+    test.assert(browse(hex("1a45dfa342828a6d6174726f736b61")) == mimecode.unknown())
+    test.assert(browse(bytes.concat([hex("1a45dfa3"), bytes.zeros(34), hex("42828477" + "65626d00")]))
                 == mimecode.unknown())
+    test.assert(browse(bytes.concat([hex("1a45dfa3"), bytes.zeros(33), hex("42828477" + "65626d00")]))
+                == mimecode.video_webm())
 
-    test.case("the algorithm never reads past the standard's own header size")
-    test.assert(mimesniff.header_bytes() == 1445)
+    test.case("a second 42 after a 42 still starts the element")
+    test.assert(browse(hex("1a45dfa3424282847765626d00")) == mimecode.video_webm())
+
+    test.case("a name that starts like webm and is not")
+    test.assert(browse(hex("1a45dfa342828477" + "656261")) == mimecode.unknown())
+
+    test.case("a stray 42 is skipped, and a wrong magic ends it")
+    test.assert(browse(hex("1a45dfa342004282847765626d00")) == mimecode.video_webm())
+    test.assert(browse(hex("1a45dfa4428284" + "7765626d00")) == mimecode.unknown())
+
+    test.case("and a size of eight zero bits is taken as eight bytes")
+    test.assert(browse(hex("1a45dfa342820000000000000000" + "7765626d00")) == mimecode.video_webm())
 
 @test
-fn test_nosniff_is_the_whole_reason_this_is_a_flag() [io]
-    // A file a site let a user upload, served as text/plain with an
-    // HTML doctype in it, runs script on the serving origin if a
-    // browser sniffs.
-    test.case("without nosniff, an HTML doctype served as text/plain is sniffed to HTML")
-    test.assert(mimesniff.sniff_with(html_head(), "text/plain", false, MimeSniffBrowsing)
+fn test_only_the_resource_header_is_read() [io]
+    test.case("the standard reads 1445 bytes")
+    test.assert(mimesniff.header_bytes() == 1445)
+    test.assert(mimesniff_core.header_bytes() == 1445)
+
+    test.case("a binary byte after them is not seen, and one inside them is")
+    let text = bytes.from_str(str.repeat("a", 1445))
+    test.assert(browse(bytes.concat([text, hex("00")])) == mimecode.text_plain())
+    let early = bytes.from_str(str.repeat("a", 1444))
+    test.assert(browse(bytes.concat([early, hex("00")])) == mimecode.unknown())
+    test.assert(mimesniff.looks_binary(bytes.concat([text, hex("00")])) == false)
+    test.assert(mimesniff.looks_binary(bytes.concat([early, hex("00")])))
+
+@test
+fn test_the_supplied_type_decides_most_of_the_answer() [io]
+    test.case("no type at all: the whole table, HTML included")
+    test.assert(mimesniff.sniff_with(html_head(), "", false, MimeSniffBrowsing) == mimecode.text_html())
+
+    test.case("a value that is not a media type counts as no type")
+    test.assert(mimesniff.sniff_with(html_head(), "garbage", false, MimeSniffBrowsing)
                 == mimecode.text_html())
 
-    test.case("with nosniff, the supplied type wins outright and the bytes are not consulted")
-    test.assert(mimesniff.sniff_with(html_head(), "text/plain", true, MimeSniffBrowsing)
+    test.case("the three unknown types count as no type")
+    for t in ["unknown/unknown", "application/unknown", "*/*", "UNKNOWN/Unknown"]
+        test.assert(mimesniff.sniff_with(html_head(), t, false, MimeSniffBrowsing) == mimecode.text_html())
+
+    test.case("with nosniff an unknown type is still sniffed, without the HTML, XML and PDF rows")
+    test.assert(mimesniff.sniff_with(html_head(), "", true, MimeSniffBrowsing) == mimecode.text_plain())
+    test.assert(mimesniff.sniff_with(bytes.from_str("%PDF-1.4"), "*/*", true, MimeSniffBrowsing)
+                == mimecode.text_plain())
+    test.assert(mimesniff.sniff_with(png_head(), "", true, MimeSniffBrowsing) == mimecode.image_png())
+
+    test.case("text/plain as an old Apache sends it is text or binary, and never HTML")
+    test.assert(mimesniff.sniff_with(html_head(), "text/plain", false, MimeSniffBrowsing)
+                == mimecode.text_plain())
+    test.assert(mimesniff.sniff_with(png_head(), "text/plain", false, MimeSniffBrowsing)
+                == mimecode.unknown())
+    for t in ["text/plain; charset=ISO-8859-1", "text/plain; charset=iso-8859-1", "text/plain; charset=UTF-8"]
+        test.assert(mimesniff.sniff_with(png_head(), t, false, MimeSniffBrowsing) == mimecode.unknown())
+
+    test.case("any other spelling of text/plain is kept")
+    test.assert(mimesniff.sniff_with(png_head(), "text/plain; charset=utf-8", false, MimeSniffBrowsing)
+                == mimecode.text_plain())
+    test.assert(mimesniff.sniff_with(png_head(), "Text/Plain", false, MimeSniffBrowsing)
                 == mimecode.text_plain())
 
-    test.case("a server can ask about its OWN response before it sends it")
-    test.assert(mimesniff.would_sniff("text/plain", false))
-    test.assert(mimesniff.would_sniff("text/plain", true) == false)
+    test.case("with nosniff a real type is kept and the bytes are not read")
+    test.assert(mimesniff.sniff_with(html_head(), "text/plain", true, MimeSniffBrowsing)
+                == mimecode.text_plain())
+    test.assert(mimesniff.sniff_with(gif_head(), "image/png", true, MimeSniffBrowsing) == mimecode.image_png())
 
-    test.case("and a supplied type outside the sniffable set is kept — the part most descriptions omit")
-    test.assert(mimesniff.is_sniffable_type("text/plain"))
-    test.assert(mimesniff.is_sniffable_type("application/octet-stream"))
-    test.assert(mimesniff.is_sniffable_type(""))
-    test.assert(mimesniff.is_sniffable_type("image/png") == false)
+    test.case("an image type becomes the image the bytes are, and stays put otherwise")
+    test.assert(mimesniff.sniff_with(gif_head(), "image/png", false, MimeSniffBrowsing) == mimecode.image_gif())
     test.assert(mimesniff.sniff_with(html_head(), "image/png", false, MimeSniffBrowsing)
                 == mimecode.image_png())
 
-    test.case("the image table alone, for a resource requested as an image")
+    test.case("likewise audio and video")
+    test.assert(mimesniff.sniff_with(mp4_head(), "video/webm", false, MimeSniffBrowsing)
+                == mimecode.video_mp4())
+    test.assert(mimesniff.sniff_with(mp4_head(), "audio/mpeg", false, MimeSniffBrowsing)
+                == mimecode.video_mp4())
+    test.assert(mimesniff.sniff_with(png_head(), "video/webm", false, MimeSniffBrowsing)
+                == mimecode.video_webm())
+
+    test.case("HTML and XML types are kept whatever the bytes")
+    test.assert(mimesniff.sniff_with(png_head(), "text/html", false, MimeSniffBrowsing) == mimecode.text_html())
+    test.assert(mimesniff.sniff_with(html_head(), "image/svg+xml", false, MimeSniffBrowsing)
+                == mimecode.image_svg_xml())
+    test.assert(mimesniff.sniff_with(html_head(), "application/xml", false, MimeSniffBrowsing)
+                == mimecode.application_xml())
+    test.assert(mimesniff.sniff_with(html_head(), "text/xml", false, MimeSniffBrowsing) == mimecode.text_xml())
+
+    test.case("every other type is kept, and one with no code answers unknown()")
+    test.assert(mimesniff.sniff_with(html_head(), "application/json", false, MimeSniffBrowsing)
+                == mimecode.application_json())
+    test.assert(mimesniff.sniff_with(html_head(), "application/octet-stream", false, MimeSniffBrowsing)
+                == mimecode.unknown())
+    test.assert(mimesniff.sniff_with(html_head(), "application/rss+xml", false, MimeSniffBrowsing)
+                == mimecode.unknown())
+
+@test
+fn test_the_other_contexts() [io]
+    test.case("the image context: the image rows, or the supplied type")
     test.assert(mimesniff.sniff(html_head(), MimeSniffImage) == mimecode.unknown())
+    test.assert(mimesniff.sniff(png_head(), MimeSniffImage) == mimecode.image_png())
+    test.assert(mimesniff.sniff(mp4_head(), MimeSniffImage) == mimecode.unknown())
+    test.assert(mimesniff.sniff_with(gif_head(), "image/png", false, MimeSniffImage) == mimecode.image_gif())
+    test.assert(mimesniff.sniff_with(html_head(), "image/png", false, MimeSniffImage) == mimecode.image_png())
+    test.assert(mimesniff.sniff_with(gif_head(), "image/svg+xml", false, MimeSniffImage)
+                == mimecode.image_svg_xml())
+    test.assert(mimesniff.sniff_with(gif_head(), "", false, MimeSniffImage) == mimecode.image_gif())
+
+    test.case("the audio and video context")
+    test.assert(mimesniff.sniff(webm_head(), MimeSniffAudioVideo) == mimecode.video_webm())
+    test.assert(mimesniff.sniff(png_head(), MimeSniffAudioVideo) == mimecode.unknown())
+    test.assert(mimesniff.sniff_with(mp4_head(), "video/webm", false, MimeSniffAudioVideo)
+                == mimecode.video_mp4())
+    test.assert(mimesniff.sniff_with(png_head(), "video/webm", false, MimeSniffAudioVideo)
+                == mimecode.video_webm())
+
+    test.case("the text-or-binary context answers exactly two things")
+    test.assert(mimesniff.sniff(bytes.from_str("hello"), MimeSniffTextOrBinary) == mimecode.text_plain())
+    test.assert(mimesniff.sniff(html_head(), MimeSniffTextOrBinary) == mimecode.text_plain())
+    test.assert(mimesniff.sniff(png_head(), MimeSniffTextOrBinary) == mimecode.unknown())
+
+    test.case("where a byte order mark is two or three bytes, and makes binary bytes text")
+    test.assert(mimesniff.sniff(hex("feff0000"), MimeSniffTextOrBinary) == mimecode.text_plain())
+    test.assert(mimesniff.sniff(hex("fffe0000"), MimeSniffTextOrBinary) == mimecode.text_plain())
+    test.assert(mimesniff.sniff(hex("efbbbf00"), MimeSniffTextOrBinary) == mimecode.text_plain())
+
+    test.case("and a supplied type there is kept for HTML, XML or nosniff")
+    test.assert(mimesniff.sniff_with(png_head(), "text/plain", false, MimeSniffTextOrBinary)
+                == mimecode.unknown())
+    test.assert(mimesniff.sniff_with(png_head(), "text/plain", true, MimeSniffTextOrBinary)
+                == mimecode.text_plain())
+    test.assert(mimesniff.sniff_with(png_head(), "text/html", false, MimeSniffTextOrBinary)
+                == mimecode.text_html())
+    test.assert(mimesniff.sniff_with(png_head(), "", false, MimeSniffTextOrBinary) == mimecode.unknown())
+
+@test
+fn test_a_server_can_ask_about_its_own_response() [io]
+    test.case("would the bytes be read at all")
+    test.assert(mimesniff.would_sniff("text/plain", false))
+    test.assert(mimesniff.would_sniff("text/plain", true) == false)
+    test.assert(mimesniff.would_sniff("", false))
+    test.assert(mimesniff.would_sniff("", true))
+    test.assert(mimesniff.would_sniff("*/*", true))
+    test.assert(mimesniff.would_sniff("image/png", false))
+    test.assert(mimesniff.would_sniff("video/mp4", false))
+    test.assert(mimesniff.would_sniff("audio/ogg", false))
+    test.assert(mimesniff.would_sniff("image/png", true) == false)
+    test.assert(mimesniff.would_sniff("text/html", false) == false)
+    test.assert(mimesniff.would_sniff("image/svg+xml", false) == false)
+    test.assert(mimesniff.would_sniff("application/json", false) == false)
+    test.assert(mimesniff.would_sniff("text/plain; charset=utf-8", false) == false)
+
+    test.case("the types that count as no type at all")
+    test.assert(mimesniff.is_sniffable_type(""))
+    test.assert(mimesniff.is_sniffable_type("unknown/unknown"))
+    test.assert(mimesniff.is_sniffable_type("application/unknown"))
+    test.assert(mimesniff.is_sniffable_type("*/*"))
+    test.assert(mimesniff.is_sniffable_type("not a type"))
+    test.assert(mimesniff.is_sniffable_type("text/plain") == false)
+    test.assert(mimesniff.is_sniffable_type("application/octet-stream") == false)
+    test.assert(mimesniff.is_sniffable_type("image/png") == false)
 
 @test
 fn test_text_or_binary_is_a_rule_and_not_a_heuristic() [io]
@@ -107,133 +349,67 @@ fn test_text_or_binary_is_a_rule_and_not_a_heuristic() [io]
 
     test.case("and plain text is not, even with a tab and a newline in it")
     test.assert(mimesniff.looks_binary(bytes.from_str("hello\tworld\n")) == false)
+    test.assert(mimesniff.looks_binary(bytes.zeros(0)) == false)
 
-    test.case("the text-or-binary context answers exactly two things")
-    test.assert(mimesniff.sniff(bytes.from_str("hello"), MimeSniffTextOrBinary)
-                == mimecode.text_plain())
-    test.assert(mimesniff.sniff(png_head(), MimeSniffTextOrBinary) == mimecode.unknown())
-
-    test.case("a BOM is checked before everything else, and says which encoding")
+    test.case("a byte order mark says which encoding")
     test.assert(mimesniff.bom_charset(hex("efbbbf")) == "utf-8")
+    test.assert(mimesniff.bom_charset(hex("feff")) == "utf-16be")
     test.assert(mimesniff.bom_charset(hex("fffe")) == "utf-16le")
+    test.assert(mimesniff.bom_charset(hex("efbb")) == "")
     test.assert(mimesniff.bom_charset(png_head()) == "")
 
-    test.case("and how many bytes to skip, because a UTF-16 file read as UTF-8 is nulls")
+    test.case("and how many bytes to skip")
     test.assert(mimesniff.bom_len(hex("efbbbf")) == 3)
+    test.assert(mimesniff.bom_len(hex("fffe")) == 2)
     test.assert(mimesniff.bom_len(png_head()) == 0)
 
 @test
-fn test_the_device_machine_walks_the_same_table_as_the_host() [io]
-    // One walk called from two places, not two implementations — which
-    // is the property that keeps the two answers from drifting apart.
+fn test_the_walk_a_device_runs() [io]
     let ctx = mimesniff.context_code(MimeSniffBrowsing)
 
+    test.case("the context codes are the core module's")
+    test.assert(ctx == mimesniff_core.ctx_browsing())
+    test.assert(mimesniff.context_code(MimeSniffTextOrBinary) == mimesniff_core.ctx_text_or_binary())
+    test.assert(mimesniff.context_code(MimeSniffImage) == mimesniff_core.ctx_image())
+    test.assert(mimesniff.context_code(MimeSniffAudioVideo) == mimesniff_core.ctx_audio_video())
+
     test.case("a fresh sniff has seen nothing and decided nothing")
-    var s = mimesniff.sniff_start(ctx)
-    test.assert(mimesniff.sniff_pos(s) == 0)
-    test.assert(mimesniff.sniff_settled(s) == false)
-    test.assert(mimesniff.sniff_code(s) == mimecode.unknown())
+    var s = mimesniff_core.sniff_start(ctx)
+    test.assert(mimesniff_core.sniff_pos(s) == 0)
+    test.assert(mimesniff_core.sniff_settled(s) == false)
+    test.assert(mimesniff_core.sniff_code(s) == mimecode.unknown())
 
     test.case("fed the eight bytes of a PNG signature, it settles on the code `sniff` answers")
-    s = mimesniff.sniff_byte(s, 0x89)
-    s = mimesniff.sniff_byte(s, 0x50)
-    s = mimesniff.sniff_byte(s, 0x4E)
-    s = mimesniff.sniff_byte(s, 0x47)
-    s = mimesniff.sniff_byte(s, 0x0D)
-    s = mimesniff.sniff_byte(s, 0x0A)
-    s = mimesniff.sniff_byte(s, 0x1A)
-    s = mimesniff.sniff_byte(s, 0x0A)
-    test.assert(mimesniff.sniff_pos(s) == 8)
-    test.assert(mimesniff.sniff_settled(s))
-    test.assert(mimesniff.sniff_code(s) == mimesniff.sniff(png_head(), MimeSniffBrowsing))
+    for b in [0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A]
+        s = mimesniff_core.sniff_byte(s, b)
+    test.assert(mimesniff_core.sniff_settled(s) == false)
+    s = mimesniff_core.sniff_byte(s, 0x0A)
+    test.assert(mimesniff_core.sniff_pos(s) == 8)
+    test.assert(mimesniff_core.sniff_settled(s))
+    test.assert(mimesniff_core.sniff_code(s) == mimesniff.sniff(png_head(), MimeSniffBrowsing))
 
-    test.case("and it says the resource is binary as it goes, rather than in a second pass")
-    test.assert(mimesniff.sniff_binary(s))
+    test.case("it says the resource is binary as it goes")
+    test.assert(mimesniff_core.sniff_binary(s))
+
+    test.case("bytes after it settles change nothing and are not counted")
+    s = mimesniff_core.sniff_byte(s, 0x3C)
+    test.assert(mimesniff_core.sniff_pos(s) == 8)
+    test.assert(mimesniff_core.sniff_code(mimesniff_core.sniff_end(s)) == mimecode.image_png())
+
+    test.case("only the low eight bits of a byte are read")
+    var t = mimesniff_core.sniff_start(ctx)
+    t = mimesniff_core.sniff_byte(t, 0x142)
+    t = mimesniff_core.sniff_byte(t, 0x4D)
+    test.assert(mimesniff_core.sniff_code(t) == mimecode.image_bmp())
 
     test.case("a resource that ends before the table decides still gets an answer")
-    let e = mimesniff.sniff_end(mimesniff.sniff_start(ctx))
-    test.assert(mimesniff.sniff_settled(e))
-    test.assert(mimesniff.sniff_code(e) == mimecode.unknown())
+    let e = mimesniff_core.sniff_end(mimesniff_core.sniff_start(ctx))
+    test.assert(mimesniff_core.sniff_settled(e))
+    test.assert(mimesniff_core.sniff_code(e) == mimecode.text_plain())
 
-@test
-fn test_negotiation_answers_one_of_the_servers_own_offers() [io]
-    test.case("the client's preference decides between two the server offers")
-    test.assert(mimeaccept.best("text/html;q=0.9, application/json",
-                                ["application/json", "text/html"]) == Some(0))
-
-    test.case("an absent Accept means anything, so the server's first offer wins")
-    test.assert(mimeaccept.best("", ["application/json", "text/html"]) == Some(0))
-
-    test.case("`*/*` likewise")
-    test.assert(mimeaccept.best("*/*", ["text/html", "application/json"]) == Some(0))
-
-    test.case("nothing acceptable is a 406, and that is a different answer from an empty header")
-    test.assert(mimeaccept.best("image/png", ["application/json"]) == None)
-
-    test.case("q=0 is a REFUSAL, not a low score")
-    test.assert(mimeaccept.best("*/*;q=0", ["application/json"]) == None)
-    test.assert(mimeaccept.best("application/json;q=0, text/html",
-                                ["application/json", "text/html"]) == Some(1))
-
-@test
-fn test_specificity_is_checked_before_q_which_is_the_rule_everybody_misses() [io]
-    // A client writing `text/*;q=0.9, */*;q=1` prefers anything textual
-    // and will take anything.  Ranking by q alone serves it the wrong
-    // thing.
-    test.case("a more specific range wins whatever the q values are")
-    test.assert(mimeaccept.best("text/*;q=0.9, */*;q=1",
-                                ["application/json", "text/html"]) == Some(1))
-
-    test.case("and an exact range beats a type wildcard the same way")
-    test.assert(mimeaccept.best("text/html;q=0.5, text/*;q=1.0",
-                                ["text/plain", "text/html"]) == Some(1))
-
-    test.case("specificity is published, because a caller ranking its own offers needs it")
-    match mimeaccept.parse_accept("text/html, text/*, */*")
-        Ok(rs) =>
-            test.assert(list.len(rs) == 3)
-            test.assert(mimeaccept.specificity(rs[0]) == 2)
-            test.assert(mimeaccept.specificity(rs[1]) == 1)
-            test.assert(mimeaccept.specificity(rs[2]) == 0)
-        Err(_) => test.assert(false)
-
-    test.case("q is thousandths, so two equal preferences compare equal")
-    match mimeaccept.parse_accept("text/html;q=0.8, text/plain")
-        Ok(rs) =>
-            test.assert(rs[0].quality == 800)
-            test.assert(rs[1].quality == 1000)
-        Err(_) => test.assert(false)
-
-    test.case("a q outside the grammar is refused rather than clamped")
-    match mimeaccept.parse_accept("text/html;q=banana")
-        Ok(_)  => test.assert(false)
-        Err(_) => test.assert(true)
-
-@test
-fn test_the_rest_of_the_negotiation_surface() [io]
-    test.case("a range matches case-insensitively, and only what the grammar produces")
-    match mimeaccept.range_of("text/html")
-        Ok(r)  =>
-            test.assert(mimeaccept.range_matches(r, "TEXT/HTML"))
-            test.assert(mimeaccept.range_matches(r, "text/plain") == false)
-            test.assert(mimeaccept.print_range(r) == "text/html")
-        Err(_) => test.assert(false)
-
-    test.case("the header can be built as well as read")
-    match mimeaccept.range_of("application/json")
-        Ok(r)  => test.assert(mimeaccept.print_accept([r]) == "application/json")
-        Err(_) => test.assert(false)
-
-    test.case("how acceptable a type is, for a caller ranking by something else")
-    match mimeaccept.parse_accept("text/html;q=0.8, */*;q=0.1")
-        Ok(rs) =>
-            test.assert(mimeaccept.quality_of(rs, "text/html") == 800)
-            test.assert(mimeaccept.quality_of(rs, "image/png") == 100)
-            test.assert(mimeaccept.best_of(rs, ["image/png", "text/html"]) == Some(1))
-        Err(_) => test.assert(false)
-
-    test.case("a header past the bound is truncated rather than refused")
-    test.assert(mimeaccept.best_bounded("a/b, c/d, text/html", ["text/html"], 2) == None)
-
-    test.case("and a response negotiated this way says so, or a cache hands it to the wrong client")
-    test.assert(mimeaccept.vary_header() == "Accept")
+    test.case("a context code outside the five walks the general table")
+    var u = mimesniff_core.sniff_start(99)
+    for b in [37, 80, 68, 70, 45]
+        u = mimesniff_core.sniff_byte(u, b)
+    test.assert(mimesniff_core.sniff_code(u) == mimecode.application_pdf())
+    test.assert(mimesniff_core.ctx_browsing_unscriptable() == 4)

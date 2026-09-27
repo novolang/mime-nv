@@ -1,0 +1,307 @@
+// differential_tests.nv — this package against Python's standard
+// library, which answers the same questions independently.
+//
+// Written by tools/differential.py; do not edit by hand.  The
+// `email` package supplies the essence, charset and boundary of each
+// header, and `mimetypes`, with its built-in map only, the type of
+// each extension both tables know.
+//
+// The two extension tables disagree on 30 extensions, which are not
+// asserted.  This package answers mime_guess's type; Python's is second:
+//
+//   .3g2      video/3gpp2                      audio/3gpp2
+//   .3gp      video/3gpp                       audio/3gpp
+//   .3gpp     video/3gpp                       audio/3gpp
+//   .aif      audio/aiff                       audio/x-aiff
+//   .aifc     audio/aiff                       audio/x-aiff
+//   .aiff     audio/aiff                       audio/x-aiff
+//   .bat      application/x-msdownload         text/plain
+//   .cdf      application/x-cdf                application/x-netcdf
+//   .dll      application/x-msdownload         application/octet-stream
+//   .ico      image/x-icon                     image/vnd.microsoft.icon
+//   .m3u      audio/x-mpegurl                  application/vnd.apple.mpegurl
+//   .m3u8     audio/x-mpegurl                  application/vnd.apple.mpegurl
+//   .mid      audio/mid                        audio/midi
+//   .midi     audio/mid                        audio/midi
+//   .mif      application/vnd.mif              application/x-mif
+//   .mjs      application/javascript           text/javascript
+//   .obj      application/x-tgif               application/octet-stream
+//   .opus     audio/ogg                        audio/opus
+//   .pl       application/x-perl               text/plain
+//   .py       text/plain                       text/x-python
+//   .ram      audio/x-pn-realaudio             application/x-pn-realaudio
+//   .rdf      application/rdf+xml              application/xml
+//   .sgm      text/sgml                        text/x-sgml
+//   .sgml     text/sgml                        text/x-sgml
+//   .srt      application/x-subrip             text/plain
+//   .tgz      application/x-compressed         application/x-tar
+//   .wav      audio/wav                        audio/x-wav
+//   .wsdl     text/xml                         application/xml
+//   .xsl      text/xml                         application/xml
+//   .xul      application/vnd.mozilla.xul+xml  text/xul
+
+use std.test
+use mimeext
+use mimetype
+
+// Each header, and what Python's `email` package answers for it:
+// the essence, the charset, and the boundary.
+fn headers() -> [(Str, Str, Str, Str)]
+    [
+        ("text/html", "text/html", "", ""),
+        ("TEXT/HTML", "text/html", "", ""),
+        ("text/html; charset=utf-8", "text/html", "utf-8", ""),
+        ("text/html; charset=UTF-8", "text/html", "utf-8", ""),
+        ("text/html;charset=ISO-8859-1", "text/html", "iso-8859-1", ""),
+        ("text/html ;  charset=\"utf-8\"", "text/html", "utf-8", ""),
+        ("text/plain; format=flowed; charset=us-ascii", "text/plain", "us-ascii", ""),
+        ("application/json", "application/json", "", ""),
+        ("application/vnd.api+json; charset=utf-8", "application/vnd.api+json", "utf-8", ""),
+        ("image/svg+xml", "image/svg+xml", "", ""),
+        ("multipart/form-data; boundary=----WebKitFormBoundary7MA4YWxkTrZu0gW",
+        "multipart/form-data",
+        "",
+        "----WebKitFormBoundary7MA4YWxkTrZu0gW"),
+        ("multipart/form-data; boundary=\"---=_Part_0_1\"", "multipart/form-data", "", "---=_Part_0_1"),
+        ("multipart/mixed; boundary=\"simple boundary\"", "multipart/mixed", "", "simple boundary"),
+        ("multipart/alternative; boundary=\"a\\\"b\"", "multipart/alternative", "", "a\"b"),
+        ("Multipart/Related; boundary=xyz; type=\"text/html\"", "multipart/related", "", "xyz"),
+        ("text/plain; charset=utf-8; charset=latin1", "text/plain", "utf-8", ""),
+        ("message/rfc822", "message/rfc822", "", ""),
+        ("application/octet-stream", "application/octet-stream", "", ""),
+        ("text/csv; header=present; charset=utf-8", "text/csv", "utf-8", ""),
+        ("application/x-www-form-urlencoded", "application/x-www-form-urlencoded", "", "")]
+
+// Each extension on which the two tables agree, with its type.
+fn extensions() -> [(Str, Str)]
+    [
+        ("aac", "audio/aac"),
+        ("adts", "audio/aac"),
+        ("ai", "application/postscript"),
+        ("au", "audio/basic"),
+        ("avi", "video/x-msvideo"),
+        ("avif", "image/avif"),
+        ("bcpio", "application/x-bcpio"),
+        ("bin", "application/octet-stream"),
+        ("bmp", "image/bmp"),
+        ("c", "text/plain"),
+        ("cpio", "application/x-cpio"),
+        ("csh", "application/x-csh"),
+        ("css", "text/css"),
+        ("csv", "text/csv"),
+        ("doc", "application/msword"),
+        ("dot", "application/msword"),
+        ("dvi", "application/x-dvi"),
+        ("eml", "message/rfc822"),
+        ("eps", "application/postscript"),
+        ("etx", "text/x-setext"),
+        ("exe", "application/octet-stream"),
+        ("gif", "image/gif"),
+        ("gtar", "application/x-gtar"),
+        ("h", "text/plain"),
+        ("hdf", "application/x-hdf"),
+        ("heic", "image/heic"),
+        ("heif", "image/heif"),
+        ("htm", "text/html"),
+        ("html", "text/html"),
+        ("ief", "image/ief"),
+        ("jpe", "image/jpeg"),
+        ("jpeg", "image/jpeg"),
+        ("jpg", "image/jpeg"),
+        ("js", "text/javascript"),
+        ("json", "application/json"),
+        ("latex", "application/x-latex"),
+        ("m1v", "video/mpeg"),
+        ("man", "application/x-troff-man"),
+        ("me", "application/x-troff-me"),
+        ("mht", "message/rfc822"),
+        ("mhtml", "message/rfc822"),
+        ("mov", "video/quicktime"),
+        ("movie", "video/x-sgi-movie"),
+        ("mp2", "audio/mpeg"),
+        ("mp3", "audio/mpeg"),
+        ("mp4", "video/mp4"),
+        ("mpa", "video/mpeg"),
+        ("mpe", "video/mpeg"),
+        ("mpeg", "video/mpeg"),
+        ("mpg", "video/mpeg"),
+        ("ms", "application/x-troff-ms"),
+        ("n3", "text/n3"),
+        ("nc", "application/x-netcdf"),
+        ("nq", "application/n-quads"),
+        ("nt", "application/n-triples"),
+        ("nws", "message/rfc822"),
+        ("oda", "application/oda"),
+        ("p12", "application/x-pkcs12"),
+        ("p7c", "application/pkcs7-mime"),
+        ("pbm", "image/x-portable-bitmap"),
+        ("pct", "image/pict"),
+        ("pdf", "application/pdf"),
+        ("pfx", "application/x-pkcs12"),
+        ("pgm", "image/x-portable-graymap"),
+        ("pic", "image/pict"),
+        ("pict", "image/pict"),
+        ("png", "image/png"),
+        ("pnm", "image/x-portable-anymap"),
+        ("pot", "application/vnd.ms-powerpoint"),
+        ("ppa", "application/vnd.ms-powerpoint"),
+        ("ppm", "image/x-portable-pixmap"),
+        ("pps", "application/vnd.ms-powerpoint"),
+        ("ppt", "application/vnd.ms-powerpoint"),
+        ("ps", "application/postscript"),
+        ("pwz", "application/vnd.ms-powerpoint"),
+        ("qt", "video/quicktime"),
+        ("ra", "audio/x-pn-realaudio"),
+        ("ras", "image/x-cmu-raster"),
+        ("rgb", "image/x-rgb"),
+        ("roff", "application/x-troff"),
+        ("rtf", "application/rtf"),
+        ("rtx", "text/richtext"),
+        ("sh", "application/x-sh"),
+        ("shar", "application/x-shar"),
+        ("snd", "audio/basic"),
+        ("so", "application/octet-stream"),
+        ("src", "application/x-wais-source"),
+        ("sv4cpio", "application/x-sv4cpio"),
+        ("sv4crc", "application/x-sv4crc"),
+        ("svg", "image/svg+xml"),
+        ("svgz", "image/svg+xml"),
+        ("swf", "application/x-shockwave-flash"),
+        ("t", "application/x-troff"),
+        ("tar", "application/x-tar"),
+        ("tcl", "application/x-tcl"),
+        ("tex", "application/x-tex"),
+        ("texi", "application/x-texinfo"),
+        ("texinfo", "application/x-texinfo"),
+        ("tif", "image/tiff"),
+        ("tiff", "image/tiff"),
+        ("tr", "application/x-troff"),
+        ("trig", "application/trig"),
+        ("tsv", "text/tab-separated-values"),
+        ("txt", "text/plain"),
+        ("ustar", "application/x-ustar"),
+        ("vcf", "text/x-vcard"),
+        ("vtt", "text/vtt"),
+        ("wasm", "application/wasm"),
+        ("webm", "video/webm"),
+        ("webmanifest", "application/manifest+json"),
+        ("webp", "image/webp"),
+        ("wiz", "application/msword"),
+        ("xbm", "image/x-xbitmap"),
+        ("xls", "application/vnd.ms-excel"),
+        ("xml", "text/xml"),
+        ("xpm", "image/x-xpixmap"),
+        ("xwd", "image/x-xwindowdump"),
+        ("zip", "application/zip")]
+
+// Each type whose preferred extension Python names, where the name
+// is one the table lists for the type.
+fn preferred() -> [(Str, Str)]
+    [
+        ("application/json", ".json"),
+        ("application/manifest+json", ".webmanifest"),
+        ("application/msword", ".doc"),
+        ("application/n-quads", ".nq"),
+        ("application/n-triples", ".nt"),
+        ("application/octet-stream", ".bin"),
+        ("application/oda", ".oda"),
+        ("application/pdf", ".pdf"),
+        ("application/pkcs7-mime", ".p7c"),
+        ("application/postscript", ".ps"),
+        ("application/rtf", ".rtf"),
+        ("application/trig", ".trig"),
+        ("application/vnd.ms-excel", ".xls"),
+        ("application/vnd.ms-powerpoint", ".ppt"),
+        ("application/wasm", ".wasm"),
+        ("application/x-bcpio", ".bcpio"),
+        ("application/x-cpio", ".cpio"),
+        ("application/x-csh", ".csh"),
+        ("application/x-dvi", ".dvi"),
+        ("application/x-gtar", ".gtar"),
+        ("application/x-hdf", ".hdf"),
+        ("application/x-latex", ".latex"),
+        ("application/x-pkcs12", ".p12"),
+        ("application/x-sh", ".sh"),
+        ("application/x-shar", ".shar"),
+        ("application/x-shockwave-flash", ".swf"),
+        ("application/x-sv4cpio", ".sv4cpio"),
+        ("application/x-sv4crc", ".sv4crc"),
+        ("application/x-tar", ".tar"),
+        ("application/x-tcl", ".tcl"),
+        ("application/x-tex", ".tex"),
+        ("application/x-texinfo", ".texi"),
+        ("application/x-troff", ".roff"),
+        ("application/x-troff-man", ".man"),
+        ("application/x-troff-me", ".me"),
+        ("application/x-troff-ms", ".ms"),
+        ("application/x-ustar", ".ustar"),
+        ("application/x-wais-source", ".src"),
+        ("application/zip", ".zip"),
+        ("audio/aac", ".aac"),
+        ("audio/basic", ".au"),
+        ("audio/mpeg", ".mp3"),
+        ("audio/x-pn-realaudio", ".ra"),
+        ("image/avif", ".avif"),
+        ("image/bmp", ".bmp"),
+        ("image/gif", ".gif"),
+        ("image/heic", ".heic"),
+        ("image/heif", ".heif"),
+        ("image/ief", ".ief"),
+        ("image/jpeg", ".jpg"),
+        ("image/pict", ".pict"),
+        ("image/png", ".png"),
+        ("image/svg+xml", ".svg"),
+        ("image/tiff", ".tiff"),
+        ("image/webp", ".webp"),
+        ("image/x-cmu-raster", ".ras"),
+        ("image/x-portable-anymap", ".pnm"),
+        ("image/x-portable-bitmap", ".pbm"),
+        ("image/x-portable-graymap", ".pgm"),
+        ("image/x-portable-pixmap", ".ppm"),
+        ("image/x-rgb", ".rgb"),
+        ("image/x-xbitmap", ".xbm"),
+        ("image/x-xpixmap", ".xpm"),
+        ("image/x-xwindowdump", ".xwd"),
+        ("message/rfc822", ".eml"),
+        ("text/css", ".css"),
+        ("text/csv", ".csv"),
+        ("text/html", ".html"),
+        ("text/javascript", ".js"),
+        ("text/n3", ".n3"),
+        ("text/plain", ".txt"),
+        ("text/richtext", ".rtx"),
+        ("text/tab-separated-values", ".tsv"),
+        ("text/vtt", ".vtt"),
+        ("text/x-setext", ".etx"),
+        ("text/x-vcard", ".vcf"),
+        ("text/xml", ".xml"),
+        ("video/mp4", ".mp4"),
+        ("video/mpeg", ".mpeg"),
+        ("video/quicktime", ".mov"),
+        ("video/webm", ".webm"),
+        ("video/x-msvideo", ".avi"),
+        ("video/x-sgi-movie", ".movie")]
+
+@test
+fn test_the_email_package_reads_each_header_the_same_way() [io]
+    for (h, essence, charset, boundary) in headers()
+        test.case(h)
+        match mimetype.parse(h)
+            Ok(m)  =>
+                test.assert(mimetype.essence(h, m) == essence)
+                test.assert(mimetype.charset(h, m) == charset)
+                test.assert(mimetype.boundary(h, m) == boundary)
+            Err(_) =>
+                test.assert(false)
+
+@test
+fn test_mimetypes_agrees_on_the_extensions_both_tables_know() [io]
+    test.case("118 extensions")
+    for (ext, t) in extensions()
+        test.assert(mimeext.type_for_ext(ext) == t)
+
+@test
+fn test_mimetypes_prefers_the_same_extension() [io]
+    test.case("83 types")
+    for (t, ext) in preferred()
+        test.assert(mimeext.preferred_ext(t) == ext)

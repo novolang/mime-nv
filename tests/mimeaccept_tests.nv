@@ -1,0 +1,227 @@
+// mimeaccept_tests.nv — `Accept` parsed, and a server's offers ranked
+// against it.
+//
+// The vectors are RFC 9110 section 12.5.1's examples.  The rule they
+// exercise is that the quality of an offer is the `q` of the most
+// specific range matching it, and the offer with the highest quality
+// wins, the server's own order breaking a tie.
+
+use std.test
+use std.list
+use mimeaccept
+
+// The ranges of a header known to parse; the empty list stands for a
+// typo and fails the case that used it.
+fn ranges(header: Str) -> [MimeRange]
+    match mimeaccept.parse_accept(header)
+        Ok(rs) => rs
+        Err(_) => []
+
+@test
+fn test_negotiation_answers_one_of_the_servers_own_offers() [io]
+    test.case("the client's preference decides between two the server offers")
+    test.assert(mimeaccept.best("text/html;q=0.9, application/json", ["application/json", "text/html"])
+                == Some(0))
+    test.assert(mimeaccept.best("text/html, application/json;q=0.9", ["application/json", "text/html"])
+                == Some(1))
+
+    test.case("an absent Accept means anything, so the server's first offer wins")
+    test.assert(mimeaccept.best("", ["application/json", "text/html"]) == Some(0))
+    test.assert(mimeaccept.best(" ,, ", ["application/json", "text/html"]) == Some(0))
+
+    test.case("`*/*` likewise, and a tie goes to the server's order")
+    test.assert(mimeaccept.best("*/*", ["text/html", "application/json"]) == Some(0))
+
+    test.case("nothing acceptable is a 406, and that differs from an empty header")
+    test.assert(mimeaccept.best("image/png", ["application/json"]) == None)
+
+    test.case("with no offers there is nothing to answer")
+    test.assert(mimeaccept.best("", []) == None)
+
+    test.case("q=0 refuses, rather than scoring low")
+    test.assert(mimeaccept.best("*/*;q=0", ["application/json"]) == None)
+    test.assert(mimeaccept.best("application/json;q=0, text/html", ["application/json", "text/html"])
+                == Some(1))
+    test.assert(mimeaccept.best("application/json;q=0, */*", ["application/json"]) == None)
+
+@test
+fn test_the_rfc_9110_examples() [io]
+    test.case("audio/*; q=0.2, audio/basic prefers audio/basic, and takes any audio at 0.2")
+    let audio = "audio/*; q=0.2, audio/basic"
+    test.assert(mimeaccept.best(audio, ["audio/mpeg", "audio/basic"]) == Some(1))
+    test.assert(mimeaccept.best(audio, ["audio/mpeg"]) == Some(0))
+    test.assert(mimeaccept.quality_of(ranges(audio), "audio/mpeg") == 200)
+
+    test.case("text/html and text/x-c are equally preferred, then x-dvi, then plain")
+    // The RFC folds this header over two lines.  A recipient replaces
+    // the fold with a space (RFC 9112 section 5.2), so the value this
+    // package is handed has none.
+    let text = "text/plain; q=0.5, text/html, text/x-dvi; q=0.8, text/x-c"
+    test.assert(mimeaccept.best(text, ["text/plain", "text/x-dvi", "text/x-c", "text/html"]) == Some(2))
+    test.assert(mimeaccept.best(text, ["text/plain", "text/x-dvi"]) == Some(1))
+    test.assert(mimeaccept.best(text, ["text/plain"]) == Some(0))
+
+    test.case("a more specific range overrides a less specific one")
+    let rs = ranges("text/*, text/plain, text/plain;format=flowed, */*")
+    test.assert(list.len(rs) == 4)
+    test.assert(mimeaccept.specificity(rs[0]) == 1)
+    test.assert(mimeaccept.specificity(rs[1]) == 2)
+    test.assert(mimeaccept.specificity(rs[2]) == 3)
+    test.assert(mimeaccept.specificity(rs[3]) == 0)
+
+    test.case("the quality table: each type takes the q of the most specific range it matches")
+    // The RFC's table gives text/html;level=3 the value 0.7, which the
+    // rule stated above it does not: the only ranges matching it are
+    // text/* at 0.3 and */* at 0.5, and text/* is the more specific.
+    // RFC 7231's version of the example used text/html ranges, where
+    // 0.7 was right.
+    let h = "text/*;q=0.3, text/plain;q=0.7, text/plain;format=flowed, text/plain;format=fixed;q=0.4, */*;q=0.5"
+    let table = ranges(h)
+    test.assert(mimeaccept.quality_of(table, "text/plain;format=flowed") == 1000)
+    test.assert(mimeaccept.quality_of(table, "text/plain") == 700)
+    test.assert(mimeaccept.quality_of(table, "text/html") == 300)
+    test.assert(mimeaccept.quality_of(table, "image/jpeg") == 500)
+    test.assert(mimeaccept.quality_of(table, "text/plain;format=fixed") == 400)
+    test.assert(mimeaccept.quality_of(table, "text/html;level=3") == 300)
+
+@test
+fn test_specificity_picks_the_range_and_quality_picks_the_offer() [io]
+    test.case("a more specific range sets its type's quality even when it is lower")
+    test.assert(mimeaccept.best("text/html;q=0.5, text/*;q=1.0", ["text/plain", "text/html"]) == Some(0))
+    test.assert(mimeaccept.quality_of(ranges("text/html;q=0.5, text/*;q=1.0"), "text/html") == 500)
+
+    test.case("so text/*;q=0.9 with */*;q=1 ranks anything that is not text above text")
+    test.assert(mimeaccept.best("text/*;q=0.9, */*;q=1", ["text/html", "application/json"]) == Some(1))
+
+    test.case("among equally specific ranges, the first written counts")
+    test.assert(mimeaccept.quality_of(ranges("text/html;q=0.2, text/html;q=0.9"), "text/html") == 200)
+
+@test
+fn test_parsing_the_header() [io]
+    test.case("q is thousandths, so two equal preferences compare equal")
+    let rs = ranges("text/html;q=0.8, text/plain, a/b;q=0.125, c/d;q=1.000, e/f;Q=0.")
+    test.assert(list.len(rs) == 5)
+    test.assert(rs[0].quality == 800)
+    test.assert(rs[1].quality == 1000)
+    test.assert(rs[2].quality == 125)
+    test.assert(rs[3].quality == 1000)
+    test.assert(rs[4].quality == 0)
+
+    test.case("the type and subtype are lowercased, and the other parameters kept in order")
+    let ps = ranges("Text/HTML;Level=1;q=0.5;charset=\"utf-8\"")
+    test.assert(ps[0].type_name == "text")
+    test.assert(ps[0].subtype == "html")
+    test.assert(ps[0].extensions == [("level", "1"), ("charset", "utf-8")])
+
+    test.case("a comma inside a quoted value does not split the list")
+    let qs = ranges("text/plain;x=\"a,b\\\"c\", text/html")
+    test.assert(list.len(qs) == 2)
+    test.assert(qs[0].extensions == [("x", "a,b\"c")])
+
+    test.case("a q outside the grammar is refused rather than clamped")
+    for bad in ["banana", "1.5", "2", "0.1234", "1.001", "", "0x5", "\"0.5\"", "0.a"]
+        match mimeaccept.parse_accept("text/html;q=" + bad)
+            Ok(_)  => test.assert(bad == "")
+            Err(e) =>
+                match e
+                    MimeBadQuality(text) => test.assert(text == bad)
+                    MimeBadParam(_)      => test.assert(bad == "")
+                    _                    => test.assert(false)
+
+    test.case("a range that does not parse refuses the header, at the header's offset")
+    match mimeaccept.parse_accept("text/html, text/ht ml")
+        Ok(_)  => test.assert(false)
+        Err(e) =>
+            match e
+                MimeBadToken(at, b) =>
+                    test.assert(at == 18)
+                    test.assert(b == 32)
+                _                   => test.assert(false)
+    for bad in ["a/b, c", "a/b, c/d;x=\"open", "a/b, c/d;x=\"a\\", "a/b, c/d;x"]
+        match mimeaccept.parse_accept(bad)
+            Ok(_)  => test.assert(false)
+            Err(e) => test.assert(str.len(e.message()) > 0)
+
+    test.case("an empty header has no ranges")
+    test.assert(list.len(ranges("")) == 0)
+
+@test
+fn test_negotiation_reads_what_it_can() [io]
+    test.case("a range that does not parse is ignored, and the rest still decide")
+    test.assert(mimeaccept.best("text/html;q=banana, application/json", ["text/html", "application/json"])
+                == Some(1))
+
+    test.case("a header with nothing readable is treated as empty")
+    test.assert(mimeaccept.best("garbage", ["text/html", "application/json"]) == Some(0))
+
+    test.case("a header past the bound is truncated rather than refused")
+    test.assert(mimeaccept.best_bounded("a/b, c/d, text/html", ["text/html"], 2) == None)
+    test.assert(mimeaccept.best_bounded("a/b, c/d, text/html", ["text/html"], 3) == Some(0))
+
+    test.case("an offer that is not a media type matches nothing")
+    test.assert(mimeaccept.best("*/*", ["not a type", "text/html"]) == Some(1))
+
+@test
+fn test_the_rest_of_the_surface() [io]
+    test.case("a range matches case-insensitively, and only what the grammar produces")
+    match mimeaccept.range_of("text/html")
+        Ok(r)  =>
+            test.assert(mimeaccept.range_matches(r, "TEXT/HTML"))
+            test.assert(mimeaccept.range_matches(r, "text/plain") == false)
+            test.assert(mimeaccept.range_matches(r, "image/html") == false)
+            test.assert(mimeaccept.range_matches(r, "garbage") == false)
+            test.assert(mimeaccept.print_range(r) == "text/html")
+        Err(_) => test.assert(false)
+
+    test.case("a wildcard type with a concrete subtype matches nothing")
+    match mimeaccept.range_of("*/html")
+        Ok(r)  =>
+            test.assert(mimeaccept.range_matches(r, "text/html") == false)
+            test.assert(mimeaccept.specificity(r) == 0)
+        Err(_) => test.assert(false)
+
+    test.case("a range's parameters must be on the type, with the same value")
+    match mimeaccept.range_of("text/plain;format=flowed")
+        Ok(r)  =>
+            test.assert(mimeaccept.range_matches(r, "text/plain; format=flowed; charset=utf-8"))
+            test.assert(mimeaccept.range_matches(r, "text/plain") == false)
+            test.assert(mimeaccept.range_matches(r, "text/plain;format=fixed") == false)
+        Err(_) => test.assert(false)
+
+    test.case("range_of takes one range, at the quality it names")
+    match mimeaccept.range_of("text/html;q=0.25")
+        Ok(r)  => test.assert(r.quality == 250)
+        Err(_) => test.assert(false)
+    match mimeaccept.range_of("text/html, text/plain")
+        Ok(_)  => test.assert(false)
+        Err(e) =>
+            match e
+                MimeBadToken(at, b) =>
+                    test.assert(at == 9)
+                    test.assert(b == 44)
+                _                   => test.assert(false)
+
+    test.case("the header can be built as well as read")
+    let built = ranges("application/json, text/html;level=1;q=0.5, text/plain;x=\"a b\";q=0, */*;q=0.001")
+    test.assert(mimeaccept.print_accept(built)
+                == "application/json, text/html;level=1;q=0.5, text/plain;x=\"a b\";q=0, */*;q=0.001")
+    test.assert(mimeaccept.print_accept([]) == "")
+    test.assert(mimeaccept.print_range(MimeRange { type_name: "Text", subtype: "HTML", quality: 50,
+                                                   extensions: [] }) == "text/html;q=0.05")
+    test.assert(mimeaccept.print_range(MimeRange { type_name: "a", subtype: "b", quality: 1200,
+                                                   extensions: [] }) == "a/b")
+
+    test.case("a value no quoted string can carry is printed empty")
+    test.assert(mimeaccept.print_range(MimeRange { type_name: "a", subtype: "b", quality: 1000,
+                                                   extensions: [("x", "\u{1}")] }) == "a/b;x=\"\"")
+
+    test.case("how acceptable a type is, for a caller ranking by something else")
+    let rs = ranges("text/html;q=0.8, */*;q=0.1")
+    test.assert(mimeaccept.quality_of(rs, "text/html") == 800)
+    test.assert(mimeaccept.quality_of(rs, "image/png") == 100)
+    test.assert(mimeaccept.quality_of(ranges("text/html"), "image/png") == 0)
+    test.assert(mimeaccept.best_of(rs, ["image/png", "text/html"]) == Some(1))
+    test.assert(mimeaccept.best_of([], ["image/png"]) == Some(0))
+
+    test.case("and a response negotiated this way says so, or a cache hands it to the wrong client")
+    test.assert(mimeaccept.vary_header() == "Accept")
