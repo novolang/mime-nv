@@ -26,6 +26,7 @@ use mimecode
 use mimetype
 
 // The ASCII lowercase of a byte.
+@tier(app)
 fn lower(b: Int) -> Int
     if b >= 'A' and b <= 'Z'
         return b + 32
@@ -33,6 +34,7 @@ fn lower(b: Int) -> Int
 
 // Compare `ext` from offset `from`, lowercased, with a table key:
 // negative, zero or positive, bytewise.
+@tier(app)
 fn compare(ext: Str, from: Int, key: Str) -> Int
     let n = str.len(ext) - from
     let k = str.len(key)
@@ -46,6 +48,7 @@ fn compare(ext: Str, from: Int, key: Str) -> Int
     n - k
 
 // The table entry for an extension, or -1.
+@tier(app)
 fn find(ext: Str) -> Int
     var from = 0
     if str.byte_at_or(ext, 0, 0) == '.'
@@ -68,6 +71,7 @@ fn find(ext: Str) -> Int
     0 - 1
 
 // The first of a comma-joined list of types.
+@tier(app)
 fn first_type(types: Str) -> Str
     match str.index(types, ",")
         Some(i) => str.slice(types, 0, i)
@@ -86,7 +90,8 @@ fn first_type(types: Str) -> Str
 // fn main() [io]
 //     println(mimecode.code_name(mimeext.code_for_ext(".png")))
 // ```
-pub fn code_for_ext(ext: Str) -> Int []
+pub @tier(app)
+fn code_for_ext(ext: Str) -> Int []
     mimecode.code_named(type_for_ext(ext))
 
 // The media type an extension names, or `""`.
@@ -100,7 +105,8 @@ pub fn code_for_ext(ext: Str) -> Int []
 // fn main() [io]
 //     println(mimeext.type_for_ext("SVG"))   // image/svg+xml
 // ```
-pub fn type_for_ext(ext: Str) -> Str []
+pub @tier(app)
+fn type_for_ext(ext: Str) -> Str []
     let i = find(ext)
     if i < 0
         return ""
@@ -110,18 +116,21 @@ pub fn type_for_ext(ext: Str) -> Str []
 //
 // `archive.tar.gz` answers `application/gzip`: the last extension is
 // the outermost encoding.  A name with no extension answers `""`.
-pub fn type_for_name(filename: Str) -> Str []
+pub @tier(app)
+fn type_for_name(filename: Str) -> Str []
     let ext = ext_of(filename)
     if ext == ""
         return ""
     type_for_ext(ext)
 
 // The media-type code a file name implies, or `mimecode.unknown()`.
-pub fn code_for_name(filename: Str) -> Int []
+pub @tier(app)
+fn code_for_name(filename: Str) -> Int []
     mimecode.code_named(type_for_name(filename))
 
 // The essence of a media type, lowercased, or the text lowercased when
 // it does not parse.
+@tier(app)
 fn essence_of(media_type: Str) -> Str
     match mimetype.parse(media_type)
         Ok(m)  => mimetype.essence(media_type, m)
@@ -130,6 +139,7 @@ fn essence_of(media_type: Str) -> Str
 // Whether a comma-joined list of types holds `t`, which is lowercase.
 // A few of the table's types are written with capitals, and a type is
 // case-insensitive.
+@tier(app)
 fn lists(types: Str, t: Str) -> Bool
     for each in str.split(types, ",")
         if str.lower(each) == t
@@ -142,7 +152,8 @@ fn lists(types: Str, t: Str) -> Bool
 // answers the same as `text/html`.  An extension counts when the type
 // is any of those the table lists for it, so `.gz` is an extension of
 // both `application/gzip` and `application/x-gzip`.
-pub fn exts_for_type(media_type: Str) -> [Str] []
+pub @tier(app)
+fn exts_for_type(media_type: Str) -> [Str] []
     let t = essence_of(media_type)
     var out: [Str] = []
     for i in 0..ENTRIES
@@ -157,7 +168,8 @@ pub fn exts_for_type(media_type: Str) -> [Str] []
 // `mimetypes.guess_extension` picks where it picks one of them, and
 // the first in the table's order otherwise.  `image/jpeg` answers
 // `.jpg` and `text/plain` answers `.txt`.
-pub fn preferred_ext(media_type: Str) -> Str []
+pub @tier(app)
+fn preferred_ext(media_type: Str) -> Str []
     let t = essence_of(media_type)
     let chosen = preferred_of(t)
     if chosen != ""
@@ -173,7 +185,8 @@ pub fn preferred_ext(media_type: Str) -> Str []
 // leading dot marks a hidden file rather than an extension, so
 // `.gitignore` answers `""`, as does `README`, and a name ending in a
 // dot.
-pub fn ext_of(filename: Str) -> Str []
+pub @tier(app)
+fn ext_of(filename: Str) -> Str []
     let n = str.len(filename)
     var base = 0
     var dot = 0 - 1
@@ -189,20 +202,23 @@ pub fn ext_of(filename: Str) -> Str []
     str.lower(str.slice(filename, dot, n))
 
 // How many entries the extension table holds.
-pub fn ext_count() -> Int []
+pub @tier(app)
+fn ext_count() -> Int []
     ENTRIES
 
 // The extension at an index below `ext_count()`, with its dot, or `""`
 // for an index outside that range.
 //
 // The table is sorted bytewise by extension.
-pub fn ext_at(index: Int) -> Str []
+pub @tier(app)
+fn ext_at(index: Int) -> Str []
     if index < 0 or index >= ENTRIES
         return ""
     "." + entry_ext(index)
 
 // Whether the table has an entry for an extension.
-pub fn knows_ext(ext: Str) -> Bool []
+pub @tier(app)
+fn knows_ext(ext: Str) -> Bool []
     find(ext) >= 0
 
 // The extension table.
@@ -215,6 +231,7 @@ const ENTRIES: Int = 1379
 
 // The extension of entry `i`, without its dot.  Every caller passes
 // an index below ENTRIES, so the last arm is the last entry.
+@tier(app)
 fn entry_ext(i: Int) -> Str
     match i
         0    => "123"
@@ -1599,6 +1616,7 @@ fn entry_ext(i: Int) -> Str
 
 // The media types of entry `i`, most prevalent first, joined by `,`.
 // The last arm is the last entry, as in `entry_ext`.
+@tier(app)
 fn entry_types(i: Int) -> Str
     match i
         0    => "application/vnd.lotus-1-2-3"
@@ -2983,6 +3001,7 @@ fn entry_types(i: Int) -> Str
 
 // The extension to prefer for a media type, where it is not the first
 // the table lists, or `""`.
+@tier(app)
 fn preferred_of(media_type: Str) -> Str
     match media_type
         "application/octet-stream"      => "bin"

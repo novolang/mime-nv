@@ -42,6 +42,7 @@ pub struct MimeRange
 
 // A `MimeError` from a part of the header, moved to the header's own
 // offsets.
+@tier(app)
 fn shift(e: MimeError, by: Int) -> MimeError
     match e
         MimeNoSubtype(at)         => MimeNoSubtype(at + by)
@@ -54,6 +55,7 @@ fn shift(e: MimeError, by: Int) -> MimeError
 // A quality value in thousandths, from RFC 9110's grammar:
 // `0`, `0.` and up to three digits, `1`, or `1.` and up to three
 // zeros.
+@tier(app)
 fn quality(text: Str) -> Result<Int, MimeError>
     let n = str.len(text)
     let lead = str.byte_at_or(text, 0, 0)
@@ -76,6 +78,7 @@ fn quality(text: Str) -> Result<Int, MimeError>
     Ok(q)
 
 // One range, from the text of one list element.
+@tier(app)
 fn range_at(text: Str) -> Result<MimeRange, MimeError>
     match mimetype.parse(text)
         Err(e) => Err(e)
@@ -98,6 +101,7 @@ fn range_at(text: Str) -> Result<MimeRange, MimeError>
 
 // The offsets that split a header into its list elements: the commas
 // outside quoted strings, then the end.
+@tier(app)
 fn element_ends(header: Str) -> [Int]
     var ends: [Int] = []
     var quoted = false
@@ -117,6 +121,7 @@ fn element_ends(header: Str) -> [Int]
     ends
 
 // Whether a stretch of the header is only spaces and tabs.
+@tier(app)
 fn blank(header: Str, from: Int, to: Int) -> Bool
     for i in from..to
         let b = str.byte_at_or(header, i, 0)
@@ -140,7 +145,8 @@ fn blank(header: Str, from: Int, to: Int) -> Bool
 //         Ok(rs) => println(mimeaccept.print_accept(rs))
 //         Err(e) => println(e.message())
 // ```
-pub fn parse_accept(header: Str) -> Result<[MimeRange], MimeError> []
+pub @tier(app)
+fn parse_accept(header: Str) -> Result<[MimeRange], MimeError> []
     var out: [MimeRange] = []
     var from = 0
     for end in element_ends(header)
@@ -154,6 +160,7 @@ pub fn parse_accept(header: Str) -> Result<[MimeRange], MimeError> []
 
 // The ranges a negotiation reads: every element that parses, up to
 // `max` of them.  An element that does not parse is ignored.
+@tier(app)
 fn lenient(header: Str, max: Int) -> [MimeRange]
     var out: [MimeRange] = []
     var from = 0
@@ -184,7 +191,8 @@ fn lenient(header: Str, max: Int) -> [MimeRange]
 //         Some(i) => println("offer ${i}")
 //         None    => println("406")
 // ```
-pub fn best(header: Str, offers: [Str]) -> ?Int []
+pub @tier(app)
+fn best(header: Str, offers: [Str]) -> ?Int []
     best_bounded(header, offers, str.len(header) + 1)
 
 // The same as `best`, reading at most `max_ranges` ranges.
@@ -192,13 +200,15 @@ pub fn best(header: Str, offers: [Str]) -> ?Int []
 // An `Accept` with ten thousand entries is not a browser, and matching
 // is proportional to the product of the two lists.  Ranges past the
 // bound are ignored rather than refused.
-pub fn best_bounded(header: Str, offers: [Str], max_ranges: Int) -> ?Int []
+pub @tier(app)
+fn best_bounded(header: Str, offers: [Str], max_ranges: Int) -> ?Int []
     best_of(lenient(header, max_ranges), offers)
 
 // The same as `best`, over ranges already parsed.
 //
 // An empty list of ranges is an empty header: the first offer wins.
-pub fn best_of(ranges: [MimeRange], offers: [Str]) -> ?Int []
+pub @tier(app)
+fn best_of(ranges: [MimeRange], offers: [Str]) -> ?Int []
     if list.len(offers) == 0
         return None
     if list.len(ranges) == 0
@@ -230,7 +240,8 @@ pub fn best_of(ranges: [MimeRange], offers: [Str]) -> ?Int []
 //         Ok(rs) => println("${mimeaccept.quality_of(rs, "text/plain;format=flowed")}")   // 1000
 //         Err(e) => println(e.message())
 // ```
-pub fn quality_of(ranges: [MimeRange], media_type: Str) -> Int []
+pub @tier(app)
+fn quality_of(ranges: [MimeRange], media_type: Str) -> Int []
     var top = 0 - 1
     var q = 0
     for r in ranges
@@ -248,7 +259,8 @@ pub fn quality_of(ranges: [MimeRange], media_type: Str) -> Int []
 // must be on the media type with the same value.  `*/subtype` matches
 // nothing, because RFC 9110's grammar does not produce it.  A media
 // type that does not parse matches nothing.
-pub fn range_matches(r: MimeRange, media_type: Str) -> Bool []
+pub @tier(app)
+fn range_matches(r: MimeRange, media_type: Str) -> Bool []
     match mimetype.parse(media_type)
         Err(_) => false
         Ok(m)  =>
@@ -269,7 +281,8 @@ pub fn range_matches(r: MimeRange, media_type: Str) -> Bool []
 //
 // This decides which range sets an offer's quality.  It is not compared
 // between offers.
-pub fn specificity(r: MimeRange) -> Int []
+pub @tier(app)
+fn specificity(r: MimeRange) -> Int []
     if r.type_name == "*"
         return 0
     if r.subtype == "*"
@@ -278,6 +291,7 @@ pub fn specificity(r: MimeRange) -> Int []
 
 // A quality below 1000 thousandths as RFC 9110 writes it: `0`, or `0.`
 // and up to three digits.
+@tier(app)
 fn print_quality(q: Int) -> Str
     if q <= 0
         return "0"
@@ -292,7 +306,8 @@ fn print_quality(q: Int) -> Str
 //
 // Type and subtype lowercased, each parameter as `;name=value` with the
 // value quoted when it needs it, and `;q=` last, omitted when it is 1.
-pub fn print_range(r: MimeRange) -> Str []
+pub @tier(app)
+fn print_range(r: MimeRange) -> Str []
     var out = str.lower(r.type_name) + "/" + str.lower(r.subtype)
     for (name, value) in r.extensions
         match mimetype.quote(value)
@@ -308,7 +323,8 @@ pub fn print_range(r: MimeRange) -> Str []
 //
 // For a client making a request, and for a proxy rewriting a header it
 // received.
-pub fn print_accept(ranges: [MimeRange]) -> Str []
+pub @tier(app)
+fn print_accept(ranges: [MimeRange]) -> Str []
     var out = ""
     for r in ranges
         if str.len(out) > 0
@@ -320,7 +336,8 @@ pub fn print_accept(ranges: [MimeRange]) -> Str []
 //
 // A client building an `Accept` from this does not have to assemble the
 // struct and leave `quality` at zero, which would refuse the type.
-pub fn range_of(media_type: Str) -> Result<MimeRange, MimeError> []
+pub @tier(app)
+fn range_of(media_type: Str) -> Result<MimeRange, MimeError> []
     range_at(media_type)
 
 // The `Vary` header value a response negotiated this way must carry:
@@ -328,5 +345,6 @@ pub fn range_of(media_type: Str) -> Result<MimeRange, MimeError> []
 //
 // Without it a shared cache that stored a JSON response under a URL
 // hands it to the next client that asked for HTML.
-pub fn vary_header() -> Str []
+pub @tier(app)
+fn vary_header() -> Str []
     "Accept"

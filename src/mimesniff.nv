@@ -54,11 +54,13 @@ pub enum MimeSniffContext
 //
 // A server reading a file to decide its type reads this many bytes and
 // no more.
-pub fn header_bytes() -> Int []
+pub @tier(app)
+fn header_bytes() -> Int []
     mimesniff_core.header_bytes()
 
 // The `mimesniff_core` context code for a context.
-pub fn context_code(ctx: MimeSniffContext) -> Int []
+pub @tier(app)
+fn context_code(ctx: MimeSniffContext) -> Int []
     match ctx
         MimeSniffBrowsing     => mimesniff_core.ctx_browsing()
         MimeSniffTextOrBinary => mimesniff_core.ctx_text_or_binary()
@@ -66,6 +68,7 @@ pub fn context_code(ctx: MimeSniffContext) -> Int []
         MimeSniffAudioVideo   => mimesniff_core.ctx_audio_video()
 
 // Run the walk for a context code over the first bytes of `head`.
+@tier(app)
 fn walk(head: Bytes, ctx_code: Int) -> Int
     var s = mimesniff_core.sniff_start(ctx_code)
     let n = bytes.len(head)
@@ -89,12 +92,14 @@ fn walk(head: Bytes, ctx_code: Int) -> Int
 //     let head = bytes.from_hex("89504e470d0a1a0a") ?? bytes.zeros(0)
 //     println(mimecode.code_name(mimesniff.sniff(head, MimeSniffBrowsing)))
 // ```
-pub fn sniff(head: Bytes, ctx: MimeSniffContext) -> Int []
+pub @tier(app)
+fn sniff(head: Bytes, ctx: MimeSniffContext) -> Int []
     walk(head, context_code(ctx))
 
 // The parsed form of a supplied type, or `None` when the standard
 // treats it as undefined: empty, or not a media type at all (section
 // 5.1).
+@tier(app)
 fn supplied_type(supplied: Str) -> ?MimeType
     match mimetype.parse(supplied)
         Ok(m)  => Some(m)
@@ -102,6 +107,7 @@ fn supplied_type(supplied: Str) -> ?MimeType
 
 // Whether a parsed type is an XML MIME type: `text/xml`,
 // `application/xml`, or any subtype ending in `+xml`.
+@tier(app)
 fn is_xml(supplied: Str, m: MimeType) -> Bool
     if mimetype.suffix_of(supplied, m) == "xml"
         return true
@@ -109,6 +115,7 @@ fn is_xml(supplied: Str, m: MimeType) -> Bool
 
 // Whether a parsed type is one the standard sniffs as though no type
 // had been supplied.
+@tier(app)
 fn is_unknown_type(supplied: Str, m: MimeType) -> Bool
     if mimetype.essence_eq(supplied, m, "unknown/unknown")
         return true
@@ -116,6 +123,7 @@ fn is_unknown_type(supplied: Str, m: MimeType) -> Bool
 
 // Whether a supplied type is one of the four exact byte strings that
 // set the standard's check-for-apache-bug flag (section 5.1).
+@tier(app)
 fn apache_bug(supplied: Str) -> Bool
     if supplied == "text/plain" or supplied == "text/plain; charset=ISO-8859-1"
         return true
@@ -156,7 +164,8 @@ fn apache_bug(supplied: Str) -> Bool
 //     // Served as text/plain: a browser never makes that HTML.
 //     println(mimecode.code_name(mimesniff.sniff_with(page, "text/plain", false, MimeSniffBrowsing)))
 // ```
-pub fn sniff_with(head: Bytes, supplied: Str, nosniff: Bool, ctx: MimeSniffContext) -> Int []
+pub @tier(app)
+fn sniff_with(head: Bytes, supplied: Str, nosniff: Bool, ctx: MimeSniffContext) -> Int []
     let kept = mimecode.code_named(supplied)
     match supplied_type(supplied)
         None    =>
@@ -179,12 +188,14 @@ pub fn sniff_with(head: Bytes, supplied: Str, nosniff: Bool, ctx: MimeSniffConte
                 MimeSniffAudioVideo   => matched_or(sniff(head, ctx), kept)
 
 // The pattern that matched, or the supplied type's code when none did.
+@tier(app)
 fn matched_or(found: Int, kept: Int) -> Int
     if found == mimecode.unknown()
         return kept
     found
 
 // Section 7 for a supplied type that parsed and is not XML.
+@tier(app)
 fn sniff_browsing(head: Bytes, supplied: Str, m: MimeType, nosniff: Bool) -> Int
     let kept = mimecode.code_named(supplied)
     if mimetype.essence_eq(supplied, m, "text/html")
@@ -212,7 +223,8 @@ fn sniff_browsing(head: Bytes, supplied: Str, m: MimeType, nosniff: Bool) -> Int
 // or unknown type is sniffed even with `nosniff`, which only removes
 // the HTML, XML and PDF rows; the way to stop sniffing is to supply a
 // real type and `nosniff` together.
-pub fn would_sniff(supplied: Str, nosniff: Bool) -> Bool []
+pub @tier(app)
+fn would_sniff(supplied: Str, nosniff: Bool) -> Bool []
     match supplied_type(supplied)
         None    => true
         Some(m) =>
@@ -233,7 +245,8 @@ pub fn would_sniff(supplied: Str, nosniff: Bool) -> Bool []
 // That is `""`, a value that is not a media type, `unknown/unknown`,
 // `application/unknown` and `*/*`.  Every other type is kept or changed
 // only within its own family, which `would_sniff` answers.
-pub fn is_sniffable_type(supplied: Str) -> Bool []
+pub @tier(app)
+fn is_sniffable_type(supplied: Str) -> Bool []
     match supplied_type(supplied)
         None    => true
         Some(m) => is_unknown_type(supplied, m)
@@ -243,7 +256,8 @@ pub fn is_sniffable_type(supplied: Str) -> Bool []
 //
 // Tab, line feed, form feed, carriage return and escape are text.
 // Only the first `header_bytes()` bytes are read, as the standard does.
-pub fn looks_binary(head: Bytes) -> Bool []
+pub @tier(app)
+fn looks_binary(head: Bytes) -> Bool []
     let n = bytes.len(head)
     var s = mimesniff_core.sniff_start(mimesniff_core.ctx_text_or_binary())
     for i in 0..n
@@ -259,7 +273,8 @@ pub fn looks_binary(head: Bytes) -> Bool []
 // `EF BB BF` is `utf-8`, `FE FF` is `utf-16be`, and `FF FE` is
 // `utf-16le`.  A UTF-16 file read as UTF-8 decodes as nulls rather than
 // as mojibake.
-pub fn bom_charset(head: Bytes) -> Str []
+pub @tier(app)
+fn bom_charset(head: Bytes) -> Str []
     let b0 = bytes.byte_at(head, 0) ?? 0
     let b1 = bytes.byte_at(head, 1) ?? 0
     let b2 = bytes.byte_at(head, 2) ?? 0
@@ -272,7 +287,8 @@ pub fn bom_charset(head: Bytes) -> Str []
     ""
 
 // How many bytes of byte order mark to skip: 3, 2 or 0.
-pub fn bom_len(head: Bytes) -> Int []
+pub @tier(app)
+fn bom_len(head: Bytes) -> Int []
     let cs = bom_charset(head)
     if cs == "utf-8"
         return 3

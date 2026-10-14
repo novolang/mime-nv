@@ -74,6 +74,7 @@ pub enum MimeError
 // reported by anything that reports errors.
 impl Error for MimeError
     // One line: what was wrong, and at which byte offset.
+    @tier(app)
     fn message(self) -> Str
         match self
             MimeNoSubtype(at)         => "at ${at}: a media type is `type/subtype`, and one side is missing"
@@ -85,16 +86,19 @@ impl Error for MimeError
             MimeTooLong(limit)        => "longer than the limit of ${limit}"
 
 // The byte at `i`, or -1 past the end.
+@tier(app)
 fn at(s: Str, i: Int) -> Int
     str.byte_at_or(s, i, 0 - 1)
 
 // The ASCII lowercase of a byte.
+@tier(app)
 fn lower(b: Int) -> Int
     if b >= 'A' and b <= 'Z'
         return b + 32
     b
 
 // The first offset at or after `i` that is not a space or a tab.
+@tier(app)
 fn skip_ows(s: Str, i: Int) -> Int
     var j = i
     for _ in i..str.len(s)
@@ -105,6 +109,7 @@ fn skip_ows(s: Str, i: Int) -> Int
     j
 
 // The first offset at or after `i` that is not a token byte.
+@tier(app)
 fn token_end(s: Str, i: Int) -> Int
     var j = i
     for _ in i..str.len(s)
@@ -115,10 +120,12 @@ fn token_end(s: Str, i: Int) -> Int
 
 // Whether a byte may stand inside a quoted string, escaped or not:
 // tab, space, the visible ASCII bytes, and every byte above 0x7F.
+@tier(app)
 fn quoted_byte_ok(b: Int) -> Bool
     b == '\t' or b >= 32 and b <= 126 or b >= 128
 
 // The offset just past the quoted string that opens at `open`.
+@tier(app)
 fn quoted_end(s: Str, open: Int) -> Result<Int, MimeError>
     let n = str.len(s)
     var i = open + 1
@@ -143,6 +150,7 @@ fn quoted_end(s: Str, open: Int) -> Result<Int, MimeError>
 
 // The content of a well-formed quoted string between `from` and `to`,
 // with each escape replaced by the byte it escapes.
+@tier(app)
 fn unescape(s: Str, from: Int, to: Int) -> Str
     var out = ""
     var i = from
@@ -159,6 +167,7 @@ fn unescape(s: Str, from: Int, to: Int) -> Str
     out + str.slice(s, run, to)
 
 // The byte after a token, reported as the refusal it causes.
+@tier(app)
 fn refuse(s: Str, i: Int) -> MimeError
     let b = at(s, i)
     if b < 0 or b == ';' or b == ' ' or b == '\t' or b == '/'
@@ -176,7 +185,8 @@ fn refuse(s: Str, i: Int) -> MimeError
 //         Ok(m)  => println(mimetype.essence(header, m))
 //         Err(_) => println("refused")
 // ```
-pub fn parse(input: Str) -> Result<MimeType, MimeError> []
+pub @tier(app)
+fn parse(input: Str) -> Result<MimeType, MimeError> []
     parse_bounded(input, str.len(input) + 1, str.len(input))
 
 // Parse a media type, refusing more than `max_params` parameters or
@@ -185,7 +195,8 @@ pub fn parse(input: Str) -> Result<MimeType, MimeError> []
 // For a header that arrived from outside: a `Content-Type` with four
 // thousand parameters is not a browser, and a bound is cheaper than a
 // timeout.
-pub fn parse_bounded(input: Str, max_params: Int, max_bytes: Int) -> Result<MimeType, MimeError> []
+pub @tier(app)
+fn parse_bounded(input: Str, max_params: Int, max_bytes: Int) -> Result<MimeType, MimeError> []
     let n = str.len(input)
     if n > max_bytes
         return Err(MimeTooLong(max_bytes))
@@ -229,6 +240,7 @@ pub fn parse_bounded(input: Str, max_params: Int, max_bytes: Int) -> Result<Mime
 
 // The parameter that starts at `p0`: a token name, `=`, and a token or
 // quoted-string value.
+@tier(app)
 fn param_at(input: Str, p0: Int) -> Result<MimeParam, MimeError>
     let p1 = token_end(input, p0)
     if p1 == p0
@@ -250,6 +262,7 @@ fn param_at(input: Str, p0: Int) -> Result<MimeParam, MimeError>
 
 // A parameter that stops at offset `i`: a separator or the end is a
 // missing piece, and any other byte is one the grammar refuses.
+@tier(app)
 fn refuse_param(s: Str, i: Int) -> MimeError
     let b = at(s, i)
     if b < 0 or b == ';' or b == ' ' or b == '\t' or b == '='
@@ -257,15 +270,18 @@ fn refuse_param(s: Str, i: Int) -> MimeError
     MimeBadToken(i, b)
 
 // The text a span covers.
-pub fn span_str(input: Str, sp: MimeSpan) -> Str []
+pub @tier(app)
+fn span_str(input: Str, sp: MimeSpan) -> Str []
     str.slice(input, sp.start, sp.start + sp.len)
 
 // The type, lowercased.
-pub fn type_of(input: Str, m: MimeType) -> Str []
+pub @tier(app)
+fn type_of(input: Str, m: MimeType) -> Str []
     str.lower(span_str(input, m.type_span))
 
 // The subtype, lowercased, with any `+suffix` still on it.
-pub fn subtype_of(input: Str, m: MimeType) -> Str []
+pub @tier(app)
+fn subtype_of(input: Str, m: MimeType) -> Str []
     str.lower(span_str(input, m.subtype_span))
 
 // The structured syntax suffix, lowercased, or `""`.
@@ -273,19 +289,22 @@ pub fn subtype_of(input: Str, m: MimeType) -> Str []
 // `xml` for `image/svg+xml` and `json` for
 // `application/vnd.acme.thing+json` (RFC 6839).  A handler keyed on the
 // suffix handles a type it has never heard of.
-pub fn suffix_of(input: Str, m: MimeType) -> Str []
+pub @tier(app)
+fn suffix_of(input: Str, m: MimeType) -> Str []
     str.lower(span_str(input, m.suffix_span))
 
 // `type/subtype`, lowercased, with the parameters dropped.
 //
 // RFC 9110's essence, and the thing to compare rather than the header.
 // Allocates one string; `essence_eq` compares without allocating.
-pub fn essence(input: Str, m: MimeType) -> Str []
+pub @tier(app)
+fn essence(input: Str, m: MimeType) -> Str []
     type_of(input, m) + "/" + subtype_of(input, m)
 
 // Whether the span equals `text` from offset `from`, ASCII
 // case-insensitively.  The caller has checked that `text` is long
 // enough.
+@tier(app)
 fn span_eq(input: Str, sp: MimeSpan, text: Str, from: Int) -> Bool
     for i in 0..sp.len
         if lower(at(input, sp.start + i)) != lower(at(text, from + i))
@@ -296,7 +315,8 @@ fn span_eq(input: Str, sp: MimeSpan, text: Str, from: Int) -> Bool
 //
 // `probe` is compared ASCII case-insensitively and must have no
 // parameters.  Nothing is allocated.
-pub fn essence_eq(input: Str, m: MimeType, probe: Str) -> Bool []
+pub @tier(app)
+fn essence_eq(input: Str, m: MimeType, probe: Str) -> Bool []
     let t = m.type_span.len
     if str.len(probe) != t + 1 + m.subtype_span.len
         return false
@@ -308,13 +328,15 @@ pub fn essence_eq(input: Str, m: MimeType, probe: Str) -> Bool []
 //
 // The name is compared ASCII case-insensitively, which RFC 2045
 // section 5.1 requires.  The first match is answered.
-pub fn param(input: Str, m: MimeType, name: Str) -> ?MimeSpan []
+pub @tier(app)
+fn param(input: Str, m: MimeType, name: Str) -> ?MimeSpan []
     for p in m.params
         if p.name.len == str.len(name) and span_eq(input, p.name, name, 0)
             return Some(p.value)
     None
 
 // The text of a value span with its quotes and escapes removed.
+@tier(app)
 fn value_of(input: Str, sp: MimeSpan) -> Str
     if at(input, sp.start) == '"'
         return unescape(input, sp.start + 1, sp.start + sp.len - 1)
@@ -324,11 +346,13 @@ fn value_of(input: Str, sp: MimeSpan) -> Str
 //
 // For a caller walking `m.params` in order, which is how a repeated
 // parameter is seen: `param_str` answers only the first of a name.
-pub fn value_str(input: Str, p: MimeParam) -> Str []
+pub @tier(app)
+fn value_str(input: Str, p: MimeParam) -> Str []
     value_of(input, p.value)
 
 // A parameter's value by name, unquoted and unescaped, or `None`.
-pub fn param_str(input: Str, m: MimeType, name: Str) -> ?Str []
+pub @tier(app)
+fn param_str(input: Str, m: MimeType, name: Str) -> ?Str []
     match param(input, m, name)
         Some(sp) => Some(value_of(input, sp))
         None     => None
@@ -337,25 +361,29 @@ pub fn param_str(input: Str, m: MimeType, name: Str) -> ?Str []
 //
 // Charset names are case-insensitive (RFC 2046 section 4.1.2), so
 // `UTF-8` and `utf-8` are one answer.
-pub fn charset(input: Str, m: MimeType) -> Str []
+pub @tier(app)
+fn charset(input: Str, m: MimeType) -> Str []
     str.lower(param_str(input, m, "charset") ?? "")
 
 // The `boundary` parameter, unquoted, or `""`.
 //
 // A multipart body cannot be read without it, and it usually needs
 // quoting, because a boundary may hold characters a token may not.
-pub fn boundary(input: Str, m: MimeType) -> Str []
+pub @tier(app)
+fn boundary(input: Str, m: MimeType) -> Str []
     param_str(input, m, "boundary") ?? ""
 
 // A value as a parameter prints it: bare when it is a token, quoted
 // otherwise.  The value came from a parse, so every byte is one a
 // quoted string can hold.
+@tier(app)
 fn print_value(v: Str) -> Str
     if needs_quoting(v)
         return wrap(v)
     v
 
 // A value inside quotes, with `"` and `\` escaped.
+@tier(app)
 fn wrap(v: Str) -> Str
     var out = "\""
     var run = 0
@@ -374,13 +402,15 @@ fn wrap(v: Str) -> Str
 // quoted only when the token grammar refuses it bare.  Two equal types
 // print equal; the input's own spacing and needless quotes are not
 // kept.
-pub fn print(input: Str, m: MimeType) -> Str []
+pub @tier(app)
+fn print(input: Str, m: MimeType) -> Str []
     var out = essence(input, m)
     for p in m.params
         out = out + "; " + str.lower(span_str(input, p.name)) + "=" + print_value(value_of(input, p.value))
     out
 
 // The first byte of `s` that is not a token byte, or -1.
+@tier(app)
 fn bad_token_byte(s: Str) -> Int
     for i in 0..str.len(s)
         if not token_byte_ok(at(s, i))
@@ -389,6 +419,7 @@ fn bad_token_byte(s: Str) -> Int
 
 // A token checked for `build`: empty is `empty`, and a bad byte is
 // `MimeBadToken` at its offset within the token.
+@tier(app)
 fn check_token(s: Str, empty: MimeError) -> ?MimeError
     if str.len(s) == 0
         return Some(empty)
@@ -412,7 +443,8 @@ fn check_token(s: Str, empty: MimeError) -> ?MimeError
 //         Ok(t)  => println(t)
 //         Err(e) => println(e.message())
 // ```
-pub fn build(type_name: Str, subtype: Str, params: [(Str, Str)]) -> Result<Str, MimeError> []
+pub @tier(app)
+fn build(type_name: Str, subtype: Str, params: [(Str, Str)]) -> Result<Str, MimeError> []
     if let Some(e) = check_token(type_name, MimeNoSubtype(0))
         return Err(e)
     if let Some(e) = check_token(subtype, MimeNoSubtype(0))
@@ -433,7 +465,8 @@ pub fn build(type_name: Str, subtype: Str, params: [(Str, Str)]) -> Result<Str, 
 // The same rule decides a type, a subtype, a parameter name and an
 // unquoted parameter value: the bytes 0x21 to 0x7E except the
 // separators `()<>@,;:\"/[]?=`.
-pub fn token_byte_ok(byte: Int) -> Bool []
+pub @tier(app)
+fn token_byte_ok(byte: Int) -> Bool []
     if byte <= 32 or byte >= 127
         return false
     match byte
@@ -456,7 +489,8 @@ pub fn token_byte_ok(byte: Int) -> Bool []
 
 // Whether a value needs quoting to appear in a parameter: it is empty,
 // or it holds a byte a token may not.
-pub fn needs_quoting(value: Str) -> Bool []
+pub @tier(app)
+fn needs_quoting(value: Str) -> Bool []
     str.len(value) == 0 or bad_token_byte(value) >= 0
 
 // A parameter value ready to print: bare when it is a token, otherwise
@@ -464,7 +498,8 @@ pub fn needs_quoting(value: Str) -> Bool []
 //
 // A value holding a control character other than tab is refused with
 // `MimeBadToken`, because no quoted string may carry one.
-pub fn quote(value: Str) -> Result<Str, MimeError> []
+pub @tier(app)
+fn quote(value: Str) -> Result<Str, MimeError> []
     if not needs_quoting(value)
         return Ok(value)
     for i in 0..str.len(value)
@@ -477,7 +512,8 @@ pub fn quote(value: Str) -> Result<Str, MimeError> []
 //
 // A value that does not start with `"` is a token and comes back as it
 // is.  Bytes after the closing quote are refused with `MimeBadToken`.
-pub fn unquote(value: Str) -> Result<Str, MimeError> []
+pub @tier(app)
+fn unquote(value: Str) -> Result<Str, MimeError> []
     if at(value, 0) != '"'
         return Ok(value)
     match quoted_end(value, 0)

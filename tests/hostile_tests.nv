@@ -1,0 +1,45 @@
+// hostile_tests.nv — headers and file heads a few hundred kilobytes
+// long.
+
+use std.test
+use std.bytes
+use std.list
+use mimetype
+use mimeaccept
+use mimesniff
+use mimeext
+use mimecode
+
+fn parsed(r: Result<MimeType, MimeError>) -> Bool
+    match r
+        Ok(_)  => true
+        Err(_) => false
+
+fn range_count(r: Result<[MimeRange], MimeError>) -> Int
+    match r
+        Ok(ranges) => list.len(ranges)
+        Err(_)     => -1
+
+@test
+fn test_long_media_types_are_read_in_bounded_time() [io]
+    test.case("many parameters")
+    test.assert(parsed(mimetype.parse("text/plain" + ";a=b".repeat(100000))))
+    test.case("a quoted parameter that never closes is refused")
+    test.assert(not parsed(mimetype.parse("text/plain;a=\"" + "\\\\".repeat(200000))))
+    test.case("a very long token")
+    test.assert(parsed(mimetype.parse("a".repeat(300000) + "/b")))
+
+@test
+fn test_long_accept_headers_are_read_in_bounded_time() [io]
+    test.case("many ranges")
+    test.assert_eq(range_count(mimeaccept.parse_accept("a/b;q=0.5,".repeat(100000) + "c/d")), 100001)
+    test.case("a q value with a very long fraction is refused")
+    test.assert_eq(range_count(mimeaccept.parse_accept("a/b;q=0." + "9".repeat(300000))), -1)
+    test.case("negotiation over a long header picks the range with the highest quality")
+    test.assert_eq(mimeaccept.best("a/b;q=0.5,".repeat(100000) + "c/d", ["c/d", "e/f"]) ?? -1, 0)
+
+@test
+fn test_sniffing_a_large_head_and_a_long_name_terminates() [io]
+    let head = bytes.from_str("<" + "!".repeat(300000))
+    test.assert_eq(mimesniff.sniff(head, MimeSniffBrowsing), mimecode.text_plain())
+    test.assert_eq(mimeext.type_for_name("a.".repeat(200000) + "txt"), "text/plain")
