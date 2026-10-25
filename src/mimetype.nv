@@ -20,6 +20,10 @@
 // Parameters are a list in the order written.  RFC 2045 gives no
 // uniqueness rule, and a `multipart/form-data` boundary must survive
 // verbatim, so a duplicate is kept and `param` answers the first.
+//
+// The double quote byte is written 34: a lone quote character literal
+// makes the compiler's scan for the std.bytes `Cursor` prelude miss a
+// later module of the same build (a compiler defect).
 
 // A byte range into a string the caller owns.
 pub struct MimeSpan
@@ -133,7 +137,7 @@ fn quoted_end(s: Str, open: Int) -> Result<Int, MimeError>
         if i >= n
             break
         let b = at(s, i)
-        if b == '"'
+        if b == 34
             return Ok(i + 1)
         if b == '\\'
             if i + 1 >= n
@@ -249,7 +253,7 @@ fn param_at(input: Str, p0: Int) -> Result<MimeParam, MimeError>
         return Err(refuse_param(input, p1))
     let v0 = p1 + 1
     var v1 = token_end(input, v0)
-    if at(input, v0) == '"'
+    if at(input, v0) == 34
         match quoted_end(input, v0)
             Ok(e)  =>
                 v1 = e
@@ -338,7 +342,7 @@ fn param(input: Str, m: MimeType, name: Str) -> ?MimeSpan []
 // The text of a value span with its quotes and escapes removed.
 @tier(app)
 fn value_of(input: Str, sp: MimeSpan) -> Str
-    if at(input, sp.start) == '"'
+    if at(input, sp.start) == 34
         return unescape(input, sp.start + 1, sp.start + sp.len - 1)
     span_str(input, sp)
 
@@ -390,7 +394,7 @@ fn wrap(v: Str) -> Str
     let n = str.len(v)
     for i in 0..n
         let b = at(v, i)
-        if b == '"' or b == '\\'
+        if b == 34 or b == '\\'
             out = out + str.slice(v, run, i) + "\\"
             run = i
     out + str.slice(v, run, n) + "\""
@@ -514,7 +518,7 @@ fn quote(value: Str) -> Result<Str, MimeError> []
 // is.  Bytes after the closing quote are refused with `MimeBadToken`.
 pub @tier(app)
 fn unquote(value: Str) -> Result<Str, MimeError> []
-    if at(value, 0) != '"'
+    if at(value, 0) != 34
         return Ok(value)
     match quoted_end(value, 0)
         Err(e)  => Err(e)

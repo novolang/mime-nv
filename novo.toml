@@ -1,6 +1,6 @@
 [package]
 name        = "mime-nv"
-version     = "0.1.0"
+version     = "0.1.1"
 description = "Media types as values: `type/subtype; param=value` parsed into spans over the caller's own string with RFC 2045's token and quoted-string rules, mime_guess's extension table looked up both ways, the WHATWG MIME Sniffing Standard over the bytes, the supplied type and the no-sniff flag, and RFC 9110 `Accept` negotiation answering the best of a caller's own offers.  The codes and the byte-at-a-time sniffer build for a microcontroller."
 license     = "Apache-2.0"
 

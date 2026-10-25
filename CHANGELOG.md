@@ -5,6 +5,10 @@ All notable changes to mime-nv are recorded here. The format is
 package follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 with the pre-1.0 rule that a breaking change bumps the MINOR number.
 
+## 0.1.1 — 2026-10-25
+
+The double quote byte is written `34` instead of the character literal, in `mimetype` and `mimeaccept`.  A lone quote character literal made the compiler's scan for `std.bytes.Cursor` read the rest of the build as a string, so a package that used mime-nv and named `Cursor` in a signature failed with E2033.  No signature and no behaviour changed.
+
 ## 0.1.0 — 2026-09-27
 
 The first implementation of the interface published as 0.0.1: media
